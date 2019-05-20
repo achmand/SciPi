@@ -49,16 +49,16 @@ public class ScipiStream {
         DataStream<OagPublication> oagPublications = kafkaData.map(new OagPubMapper());
 
         // 1. count occurrences for each keyword (used as topics at a later stage)
-        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
-                .flatMap(new OagKwMapper())
-                .keyBy(0)
-                .sum(1);
-
-        // persist keyword count result into CassandraDB
-        CassandraSink.addSink(oagKeywords)
-                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
-                .setHost("127.0.0.1")
-                .build();
+//        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
+//                .flatMap(new OagKwMapper())
+//                .keyBy(0)
+//                .sum(1);
+//
+//        // persist keyword count result into CassandraDB
+//        CassandraSink.addSink(oagKeywords)
+//                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
+//                .setHost("127.0.0.1")
+//                .build();
 
 //        // 2. count occurrences for each field of study (used as domains at a later stage)
 //        DataStream<Tuple2<String, Integer>> oagFields = oagPublications
