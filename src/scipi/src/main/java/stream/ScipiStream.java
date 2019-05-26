@@ -7,7 +7,7 @@ package stream;
 // importing packages
 
 import com.datastax.driver.mapping.Mapper;
-import com.google.gson.Gson;
+import com.google.gson.*;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -20,6 +20,7 @@ import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
 import org.apache.flink.util.Collector;
 import publication.OagPublication;
 
+import java.lang.reflect.Type;
 import java.util.HashSet;
 import java.util.Properties;
 import java.util.Set;
@@ -49,7 +50,9 @@ import java.util.Set;
 public class ScipiStream {
 
     // used to parse JSON to POJO
-    private final static Gson gson = new Gson();
+    private final static Gson gson = new GsonBuilder()
+            .registerTypeAdapter(OagPublication.class, new PubDeserializer())
+            .create();
 
     public static void main(String[] args) throws Exception {
 
@@ -86,11 +89,11 @@ public class ScipiStream {
                     }
                 }).build();
 
-        // 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
-        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
-                .flatMap(new OagKwMapper())
-                .keyBy(0)        // key by keyword
-                .sum(1);    // sum the emitted 1
+//        // 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
+//        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
+//                .flatMap(new OagKwMapper())
+//                .keyBy(0)        // key by keyword
+//                .sum(1);    // sum the emitted 1
 
         // 2.1: persist occurrences count for keyword to CassandraDB using data sink
 //        CassandraSink.addSink(oagKeywords)
@@ -136,10 +139,6 @@ public class ScipiStream {
         environment.execute("scipi stream processing");
     }
 
-    /***************************************************
-     USER DEFINED FUNCTIONS
-     **************************************************/
-
     // validates string attributes
     private static String validateStr(String str) {
         if (str == null) {
@@ -152,6 +151,98 @@ public class ScipiStream {
         }
 
         return str.toLowerCase();
+    }
+
+    /***************************************************
+     USER DEFINED FUNCTIONS
+     **************************************************/
+
+    // OagPublication JSON deserializer
+    private static class PubDeserializer implements JsonDeserializer<OagPublication> {
+
+        @Override
+        public OagPublication deserialize(JsonElement jsonElement,
+                                          Type type,
+                                          JsonDeserializationContext jsonDeserializationContext)
+                throws JsonParseException {
+
+            // get json object
+            JsonObject jsonObject = jsonElement.getAsJsonObject();
+
+            // get keywords
+            HashSet<String> keywords = null;
+
+            // check that json array is not empty
+            if (jsonObject.get("keywords") != null) {
+                JsonArray jsonKeywords = jsonObject.get("keywords").getAsJsonArray();
+                if (jsonKeywords.size() > 0) {
+                    keywords = new HashSet<String>(jsonKeywords.size());
+                    for (JsonElement keyword : jsonKeywords) {
+                        if (!keywords.contains(keyword)) {
+                            keywords.add(keyword.getAsString());
+                        }
+                    }
+                }
+            }
+
+            // get authors
+            HashSet<String> authors = null;
+
+            // check that json array is not empty
+            if (jsonObject.get("authors") != null) {
+                JsonArray jsonAuthors = jsonObject.get("authors").getAsJsonArray();
+                if (jsonAuthors.size() > 0) {
+                    authors = new HashSet<String>(jsonAuthors.size());
+                    for (JsonElement author : jsonAuthors) {
+                        String authorName = author.getAsJsonObject().get("name").getAsString();
+                        if (!authors.contains(authorName)) {
+                            authors.add(authorName);
+                        }
+                    }
+                }
+            }
+
+            String doi = null;
+            if (jsonObject.get("doi") != null) {
+                doi = jsonObject.get("doi").getAsString();
+            }
+
+            String title = null;
+            if (jsonObject.get("title") != null) {
+                title = jsonObject.get("title").getAsString();
+            }
+
+            String publisher = null;
+            if (jsonObject.get("publisher") != null) {
+                publisher = jsonObject.get("publisher").getAsString();
+            }
+
+            String venue = null;
+            if (jsonObject.get("venue") != null) {
+                venue = jsonObject.get("venue").getAsString();
+            }
+
+            String lang = null;
+            if (jsonObject.get("lang") != null) {
+                lang = jsonObject.get("lang").getAsString();
+            }
+
+            String year = null;
+            if (jsonObject.get("year") != null) {
+                year = jsonObject.get("year").getAsString();
+            }
+
+            // return publication
+            return new OagPublication(
+                    doi,
+                    title,
+                    publisher,
+                    venue,
+                    lang,
+                    keywords,
+                    year,
+                    authors);
+        }
     }
 
     // mapper: string to POJO (OagPublication)
@@ -253,6 +344,9 @@ public class ScipiStream {
                 return;
             }
 
+            // set to cleaned keywords
+            publication.setKeywords(vKeywords);
+
             // 1.0.6: validate year
             String year = validateStr(publication.getYear());
 
@@ -260,9 +354,6 @@ public class ScipiStream {
             if (year == null || year.length() != 4) {
                 return;
             }
-
-            // set to cleaned keywords
-            publication.setKeywords(vKeywords);
 
             // 1.0.6: validate authors
 
