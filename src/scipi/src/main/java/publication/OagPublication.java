@@ -7,11 +7,7 @@ package publication;
 
 import com.datastax.driver.mapping.annotations.Column;
 import com.datastax.driver.mapping.annotations.Table;
-
-import java.util.ArrayList;
-
-// having issues persisting POJO to cassandra directly
-// stored procedures are use instead
+import java.util.Set;
 
 @Table(keyspace = "scipi", name = "oagpub")
 public class OagPublication {
@@ -31,22 +27,35 @@ public class OagPublication {
     @Column(name = "lang")
     private String lang;
 
-//    private ArrayList<OagAuthor> authors;
-//    private String venue;
-//    private String year;
-//    private ArrayList<String> keywords;
-//    private ArrayList<String> fos;
-//    private String publisher;
+    @Column(name = "keywords")
+    private Set<String> keywords;
+
+    @Column(name = "year")
+    private String year;
+
+    @Column(name = "authors")
+    private Set<String> authors;
 
     public OagPublication() {
     }
 
-    public OagPublication(String doi, String title, String publisher, String venue, String lang) {
+    public OagPublication(String doi,
+                          String title,
+                          String publisher,
+                          String venue,
+                          String lang,
+                          Set<String> keywords,
+                          String year,
+                          Set<String> authors
+    ) {
         this.setDoi(doi);
         this.setTitle(title);
         this.setPublisher(publisher);
         this.setVenue(venue);
         this.setLang(lang);
+        this.setKeywords(keywords);
+        this.setYear(year);
+        this.setAuthors(authors);
     }
 
     public String getDoi() {
@@ -89,51 +98,27 @@ public class OagPublication {
         this.lang = lang;
     }
 
-//    public ArrayList<OagAuthor> getAuthors() {
-//        return authors;
-//    }
-//
-//    public void setAuthors(ArrayList<OagAuthor> authors) {
-//        this.authors = authors;
-//    }
-//
-//    public String getVenue() {
-//        return venue;
-//    }
-//
-//    public void setVenue(String venue) {
-//        this.venue = venue;
-//    }
-//
-//    public String getYear() {
-//        return year;
-//    }
-//
-//    public void setYear(String year) {
-//        this.year = year;
-//    }
-//
-//    public ArrayList<String> getKeywords() {
-//        return keywords;
-//    }
-//
-//    public void setKeywords(ArrayList<String> keywords) {
-//        this.keywords = keywords;
-//    }
-//
-//    public ArrayList<String> getFos() {
-//        return fos;
-//    }
-//
-//    public void setFos(ArrayList<String> fos) {
-//        this.fos = fos;
-//    }
-//
-//    public String getPublisher() {
-//        return publisher;
-//    }
-//
-//    public void setPublisher(String publisher) {
-//        this.publisher = publisher;
-//    }
+    public Set<String> getKeywords() {
+        return keywords;
+    }
+
+    public void setKeywords(Set<String> keywords) {
+        this.keywords = keywords;
+    }
+
+    public String getYear() {
+        return year;
+    }
+
+    public void setYear(String year) {
+        this.year = year;
+    }
+
+    public Set<String> getAuthors() {
+        return authors;
+    }
+
+    public void setAuthors(Set<String> authors) {
+        this.authors = authors;
+    }
 }

@@ -9,31 +9,41 @@ package stream;
 import com.datastax.driver.mapping.Mapper;
 import com.google.gson.Gson;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.connectors.cassandra.CassandraSink;
 import org.apache.flink.streaming.connectors.cassandra.MapperOptions;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
-//import publication.mapper.OagKwMapper;
 import org.apache.flink.util.Collector;
 import publication.OagPublication;
-//import publication.mapper.YearWiseMapper;
 
+import java.util.HashSet;
 import java.util.Properties;
+import java.util.Set;
 
 /* Process Flow
- * 0: consume data stream from kafka
- * 1: map json strings passed from kafka to flink stream (POJO per publication)
- *      > only publications written in english
- *      > doi must not be empty as it is used as an id in CassandraDB
- *      > title must note be empty
- *      > at least a publisher or venue
+----------------
+ * 0.0: consume data stream from kafka
+ *
+ * 1.0: map json strings passed from kafka to flink stream (POJO per publication)
+ *      > 1.0.1: only publications written in english
+ *      > 1.0.2: doi must not be empty as it is used as an id in CassandraDB
+ *      > 1.0.3: title must not be empty
+ *      > 1.0.4: at least a publisher or venue
+ *      > 1.0.5: at least one keyword or field of study
+ *          > 1.0.5.1: clean keywords and keep only valid ones
+ *          >
+ *      > 1.0.6: must have a valid year
+ *      > 1.0.7: must have at least one author
+ *
  * 1.1: persist publications to CassandraDB using data sink
+ *
+ * 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
+ *
+ * 2.1: persist occurrences count for keyword to CassandraDB using data sink
  * */
 
 public class ScipiStream {
@@ -59,11 +69,11 @@ public class ScipiStream {
         Properties properties = new Properties();
         properties.setProperty("bootstrap.servers", "localhost:9092"); // IP address where Kafka is running
 
-        // 0: consume data stream from kafka
+        // 0.0: consume data stream from kafka
         DataStream<String> kafkaData = environment.addSource(
                 new FlinkKafkaConsumer<String>("oag", new SimpleStringSchema(), properties));
 
-        // 1: first we map strings from Kafka to OagPublication using OagPubMapper
+        // 1.0: first we map strings from Kafka to OagPublication using OagPubMapper
         DataStream<OagPublication> oagPublications = kafkaData.flatMap(new OagPubMapper());
 
         // 1.1: persist publications to CassandraDB using data sink
@@ -76,17 +86,23 @@ public class ScipiStream {
                     }
                 }).build();
 
+        // 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
+        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
+                .flatMap(new OagKwMapper())
+                .keyBy(0)        // key by keyword
+                .sum(1);    // sum the emitted 1
+
+        // 2.1: persist occurrences count for keyword to CassandraDB using data sink
+//        CassandraSink.addSink(oagKeywords)
+//                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
+//                .setHost("127.0.0.1")
+//                .build();
+
 //        // 1. count occurrences for each keyword (used as topics at a later stage)
 //        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
 //                .flatMap(new OagKwMapper())
 //                .keyBy(0)
 //                .sum(1);
-//
-//        // persist keyword count result into CassandraDB
-//        CassandraSink.addSink(oagKeywords)
-//                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
 
 //        // 2. count occurrences for each field of study (used as domains at a later stage)
 //        DataStream<Tuple2<String, Integer>> oagFields = oagPublications
@@ -124,13 +140,18 @@ public class ScipiStream {
      USER DEFINED FUNCTIONS
      **************************************************/
 
-    public static boolean isNullOrEmpty(String str) {
-
-        if (str != null && !str.trim().isEmpty()) {
-            return false;
+    // validates string attributes
+    private static String validateStr(String str) {
+        if (str == null) {
+            return null;
         }
 
-        return true;
+        str = str.trim();
+        if (str.isEmpty()) {
+            return null;
+        }
+
+        return str.toLowerCase();
     }
 
     // mapper: string to POJO (OagPublication)
@@ -139,74 +160,133 @@ public class ScipiStream {
         @Override
         public void flatMap(String value, Collector<OagPublication> out) throws Exception {
 
-            /* validate publication
-                > only publication written in english (en)
-                > no empty doi (used as id)
-                > no empty title
-                > must have at least a publisher or venue
-            * */
-
             // parse string/json to OagPublication
             OagPublication publication = gson.fromJson(value, OagPublication.class);
 
-            // validate language
-            String lang = publication.getLang();
+            // 1.0.1: validate language
+            String lang = validateStr(publication.getLang());
 
             // do not accept empty language
-            if (lang == null || lang.trim().isEmpty()) {
+            if (lang == null) {
                 return;
             }
 
             // do not accept non english publications
-//            if(lang.trim() != "en"){
-//                return;
-//            }
-
-            // validate doi
-            String doi = publication.getDoi();
-            if (doi.isEmpty()) {
+            if (!lang.equals("en")) {
                 return;
             }
 
-            // set doi trimmed
-            publication.setDoi(doi.trim());
+            // 1.0.2: validate doi
+            String doi = validateStr(publication.getDoi());
 
-            // title validation
-            String title = publication.getTitle();
-
-            // no empty title
-            if (title.isEmpty()) {
+            // do not accept empty doi
+            if (doi == null) {
                 return;
             }
 
-            // set title trimmed and to lower
-            publication.setTitle(title
-                    .toLowerCase()
-                    .trim());
+            // set to trimmed/lowercase doi
+            publication.setDoi(doi);
 
-            // must have a publisher or a venue
-//            String publisher = publication.getPublisher();
-//            String venue = publication.getVenue();
-//            if (publisher.isEmpty() && venue.isEmpty()) {
-//                return;
-//            }
-//
-//            // set publisher trimmed and lower if not empty
-//            if (!publisher.isEmpty()) {
-//                publication.setPublisher(publisher
-//                        .toLowerCase()
-//                        .trim());
-//            }
-//
-//            // set venue trimmed and lower if not empty
-//            if (!venue.isEmpty()) {
-//                publication.setVenue(venue
-//                        .toLowerCase()
-//                        .trim());
-//            }
+            // 1.0.3: validate title
+            String title = validateStr(publication.getTitle());
+
+            // do not accept empty title
+            if (title == null) {
+                return;
+            }
+
+            // set to trimmed/lowercase title
+            publication.setTitle(title);
+
+            // 1.0.4: validate publisher and venue
+            String publisher = validateStr(publication.getPublisher());
+            String venue = validateStr(publication.getVenue());
+
+            // must have at least publisher or venue
+            if (publisher == null && venue == null) {
+                return;
+            }
+
+            // if publisher not empty set trimmed/lowercase publisher
+            if (publisher != null) {
+                publication.setPublisher(publisher);
+            }
+
+            // if venue not empty set to trimmed/lowercase venue
+            if (venue != null) {
+                publication.setVenue(venue);
+            }
+
+            // 1.0.5: validate keywords and field of study
+            Set<String> keywords = publication.getKeywords();
+            boolean validKeywords = keywords != null && keywords.size() > 0;
+
+            // must have at least a keyword or field of study
+            if (!validKeywords) {
+                return;
+            }
+
+            // 1.0.5.1: clean keywords and keep only valid ones
+            Set<String> vKeywords = new HashSet<String>();
+            for (String keyword : keywords) {
+                keyword = validateStr(keyword);
+
+                // do not accept empty keywords or keyword with more than 30 char
+                if (keyword == null || keyword.length() > 30) {
+                    continue;
+                }
+
+                // keep only letters, numbers and spaces
+                keyword = keyword.replaceAll("[^a-zA-Z0-9\\s]", "");
+                if (keyword.isEmpty()) {
+                    continue;
+                }
+
+                // append cleaned keyword
+                if (!vKeywords.contains(keyword)) {
+                    vKeywords.add(keyword);
+                }
+            }
+
+            // check that at least some keywords remain after cleaned
+            if (vKeywords.size() <= 0) {
+                return;
+            }
+
+            // 1.0.6: validate year
+            String year = validateStr(publication.getYear());
+
+            // do not accept empty year or invalid year
+            if (year == null || year.length() != 4) {
+                return;
+            }
+
+            // set to cleaned keywords
+            publication.setKeywords(vKeywords);
+
+            // 1.0.6: validate authors
 
             // collect publication
             out.collect(publication);
+        }
+    }
+
+    // mapper: OagPublication to Tuple<String, int> to count occurrences
+    public static final class OagKwMapper implements FlatMapFunction<OagPublication, Tuple2<String, Integer>> {
+
+        @Override
+        public void flatMap(OagPublication value, Collector<Tuple2<String, Integer>> out) throws Exception {
+
+            // get keyword set from OagPublication
+            Set<String> keywords = value.getKeywords();
+
+            // no need to validate since OagPublication was validated at an early stage
+            // map keyword to => (keyword : 1)
+            for (String keyword : keywords) {
+
+                // emit (keyword : 1)
+                out.collect(new Tuple2<String, Integer>(keyword, 1));
+            }
         }
     }
 }
