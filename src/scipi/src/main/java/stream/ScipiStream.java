@@ -158,7 +158,7 @@ public class ScipiStream {
                 .reduce(new YearWiseReducer())   // reduce by counting single & co-authored
                 .map(new YearPercMapper());
 
-        // 3.1: persist year-wise distribution to CassandraDB using data sink
+        // 4.1: persist year-wise distribution to CassandraDB using data sink
         CassandraSink.addSink(yrWiseDist)
                 .setQuery("INSERT INTO scipi.yrwisedist(year, single, joint, total, single_perc, joint_perc)" +
                         " values (?, ?, ?, ?, ?, ?);")
