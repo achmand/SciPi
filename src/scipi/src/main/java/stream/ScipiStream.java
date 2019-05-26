@@ -1,16 +1,55 @@
 package stream;
 
 /*
-    Handles/processes Kafka streams which contains publication using Apache Flink.
-*/
+
+Handles/processes Kafka streams which contains publications using Apache Flink.
+
+-------------
+PROCESS FLOW
+-------------
+ * 0.0: consume data stream from kafka
+ *
+ * 1.0: map json strings passed from kafka to flink stream (POJO per publication)
+ *      > 1.0.1: only publications written in english
+ *      > 1.0.2: doi must not be empty as it is used as an id in CassandraDB
+ *      > 1.0.3: title must not be empty
+ *      > 1.0.4: at least a publisher or venue
+ *      > 1.0.5: at least one keyword or field of study
+ *          > 1.0.5.1: clean keywords and keep only valid ones
+            > 1.0.5.2: clean fos and keep only valid ones
+ *      > 1.0.6: must have a valid year
+ *      > 1.0.7: must have at least one author
+            > 1.0.7.1: clean authors and keep only valid ones
+ *
+ * 1.1: persist publications to CassandraDB using data sink
+ *
+ * 2.0: [keyword count]: map OagPublication to Tuple<str,int> and count keyword occurrences
+ *
+ * 2.1: persist [keyword count] to CassandraDB using data sink
+ *
+ * 3.0: [field of study count]: map OagPublication to Tuple<str,int> and count fos occurrences
+ *
+ * 3.1: persist occurrences count for fos to CassandraDB using data sink
+ *
+ * 4.0: [year wise distribution]: (yr, tot single, tot joint, tot, %single, %joint)
+ *                              - map OagPublication to Tuple<str, int> and count year occurrences
+ *                              -
+ *
+ * 4.1: persist [year wise distribution] to CassandraDB using data sink
+ *
+ * */
 
 // importing packages
 
 import com.datastax.driver.mapping.Mapper;
 import com.google.gson.*;
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
+import org.apache.flink.api.java.tuple.Tuple6;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -24,29 +63,6 @@ import java.lang.reflect.Type;
 import java.util.HashSet;
 import java.util.Properties;
 import java.util.Set;
-
-/* Process Flow
-----------------
- * 0.0: consume data stream from kafka
- *
- * 1.0: map json strings passed from kafka to flink stream (POJO per publication)
- *      > 1.0.1: only publications written in english
- *      > 1.0.2: doi must not be empty as it is used as an id in CassandraDB
- *      > 1.0.3: title must not be empty
- *      > 1.0.4: at least a publisher or venue
- *      > 1.0.5: at least one keyword or field of study
- *          > 1.0.5.1: clean keywords and keep only valid ones
-            > 1.0.5.2: clean fos and keep only valid ones
- *      > 1.0.6: must have a valid year
- *      > 1.0.7: must have at least one author
-            > 1.0.7.1: clean authors and keep onl valid ones
- *
- * 1.1: persist publications to CassandraDB using data sink
- *
- * 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
- *
- * 2.1: persist occurrences count for keyword to CassandraDB using data sink
- * */
 
 public class ScipiStream {
 
@@ -90,52 +106,43 @@ public class ScipiStream {
                     }
                 }).build();
 
-//        // 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
-//        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
-//                .flatMap(new OagKwMapper())
-//                .keyBy(0)        // key by keyword
-//                .sum(1);    // sum the emitted 1
+        // 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
+        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
+                .flatMap(new OagKwMapper()) // map
+                .keyBy(0)           // key by keyword
+                .sum(1);       // sum the emitted 1
 
         // 2.1: persist occurrences count for keyword to CassandraDB using data sink
-//        CassandraSink.addSink(oagKeywords)
-//                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
+        CassandraSink.addSink(oagKeywords)
+                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
+                .setHost("127.0.0.1")
+                .build();
 
-//        // 1. count occurrences for each keyword (used as topics at a later stage)
-//        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
-//                .flatMap(new OagKwMapper())
-//                .keyBy(0)
-//                .sum(1);
+        // 3.0: map OagPublication to Tuple<str,int> and count fos occurrences
+        DataStream<Tuple2<String, Integer>> oagFos = oagPublications
+                .flatMap(new OagFosMapper())    // map
+                .keyBy(0)               // key by field of study
+                .sum(1);           // sum the emitted 1
 
-//        // 2. count occurrences for each field of study (used as domains at a later stage)
-//        DataStream<Tuple2<String, Integer>> oagFields = oagPublications
-//                .flatMap(new OagFosMapper())
-//                .keyBy(0)
-//                .sum(1);
-//
-//        // persist field count result into CassandraDB
-//        CassandraSink.addSink(oagFields)
-//                .setQuery("INSERT INTO scipi.oagfos(fos, count) values (?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
+        // 3.1: persist occurrences count for fos to CassandraDB using data sink
+        CassandraSink.addSink(oagFos)
+                .setQuery("INSERT INTO scipi.oagfos(fos, count) values (?, ?);")
+                .setHost("127.0.0.1")
+                .build();
 
-//        // 3. year wise distribution of article publications
-//        DataStream<Tuple2<String, Integer>> yearWiseDist = oagPublications
-//                .flatMap(new YearWiseMapper())
-//                .keyBy(0)
-//                .timeWindow(Time.seconds(5))
-//                .sum(1);
-//
-//        // persist year wise distribution result into CassandraDB
-//        CassandraSink.addSink(yearWiseDist)
-//                .setQuery("INSERT INTO scipi.yrwisedist(year, count) values (?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
+        // 4.0: map OagPublication to (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
+        DataStream<Tuple6<String, Integer, Integer, Integer, Double, Double>> yrWiseDist = oagPublications
+                .flatMap(new YearWiseMapper())   // map
+                .keyBy(0)                // key by year published
+                .reduce(new YearWiseReducer())   // reduce by counting single & co-authored
+                .map(new YearPercMapper());
 
-        // group by keyword and sum value then consume result by mongo
-//        oagKeywords.keyBy(0).sum(1).map(new OagKwBsonMapper()).
-//                addSink(new MongoSink<ObjectId, BSONWritable>("scipi", "oagkw"));
+        // 3.1: persist year-wise distribution to CassandraDB using data sink
+        CassandraSink.addSink(yrWiseDist)
+                .setQuery("INSERT INTO scipi.yrwisedist(year, single, joint, total, single_perc, joint_perc)" +
+                        " values (?, ?, ?, ?, ?, ?);")
+                .setHost("127.0.0.1")
+                .build();
 
         environment.execute("scipi stream processing");
     }
@@ -290,9 +297,8 @@ public class ScipiStream {
         }
     }
 
-
     // mapper: string to POJO (OagPublication)
-    public static final class OagPubMapper implements FlatMapFunction<String, OagPublication> {
+    private static final class OagPubMapper implements FlatMapFunction<String, OagPublication> {
 
         @Override
         public void flatMap(String value, Collector<OagPublication> out) throws Exception {
@@ -435,8 +441,8 @@ public class ScipiStream {
         }
     }
 
-    // mapper: OagPublication to Tuple<String, int> to count occurrences
-    public static final class OagKwMapper implements FlatMapFunction<OagPublication, Tuple2<String, Integer>> {
+    // mapper: OagPublication to Tuple<String, int> to count occurrences (keywords)
+    private static final class OagKwMapper implements FlatMapFunction<OagPublication, Tuple2<String, Integer>> {
 
         @Override
         public void flatMap(OagPublication value, Collector<Tuple2<String, Integer>> out) throws Exception {
@@ -444,13 +450,97 @@ public class ScipiStream {
             // get keyword set from OagPublication
             Set<String> keywords = value.getKeywords();
 
-            // no need to validate since OagPublication was validated at an early stage
-            // map keyword to => (keyword : 1)
-            for (String keyword : keywords) {
+            // check if keywords set is valid
+            if (keywords != null && keywords.size() > 0) {
 
-                // emit (keyword : 1)
-                out.collect(new Tuple2<String, Integer>(keyword, 1));
+                // no need to validate since OagPublication was validated at an early stage
+                // map keyword to => (keyword : 1)
+                for (String keyword : keywords) {
+
+                    // emit (keyword : 1)
+                    out.collect(new Tuple2<String, Integer>(keyword, 1));
+                }
             }
+        }
+    }
+
+    // mapper: OagPublication to Tuple<String, int> to count occurrences (field of study)
+    private static final class OagFosMapper implements FlatMapFunction<OagPublication, Tuple2<String, Integer>> {
+
+        @Override
+        public void flatMap(OagPublication value, Collector<Tuple2<String, Integer>> out) throws Exception {
+
+            // get fos set from OagPublication
+            Set<String> fos = value.getFos();
+
+            // check if fos set is valid)
+            if (fos != null && fos.size() > 0) {
+
+                // no need to validate since OagPublication was validated at an early stage
+                // map keyword to => (field : 1)
+                for (String field : fos) {
+
+                    // emit (fos : 1)
+                    out.collect(new Tuple2<String, Integer>(field, 1));
+                }
+            }
+        }
+    }
+
+    // mapper: OagPublication to Tuple<String, int> to count occurrences (single vs co-authored publications)
+    private static class YearWiseMapper implements FlatMapFunction<OagPublication, Tuple3<String, Integer, Integer>> {
+
+        @Override
+        public void flatMap(OagPublication publication, Collector<Tuple3<String, Integer, Integer>> out) throws Exception {
+
+            // get year from OagPublication
+            String year = publication.getYear();
+
+            // get authors from OagPublication
+            Set<String> authors = publication.getAuthors();
+
+            // set single and joint authored
+            Integer authorsCount = authors.size();
+            Integer single = authorsCount == 1 ? 1 : 0;
+            Integer joint = authorsCount > 1 ? 1 : 0;
+
+            // emit (year, single, joint)
+            out.collect(new Tuple3<String, Integer, Integer>(year, single, joint));
+        }
+    }
+
+    // reducer: reduce by adding up single-author and co-authored publications
+    private static class YearWiseReducer implements ReduceFunction<Tuple3<String, Integer, Integer>> {
+
+        @Override
+        public Tuple3<String, Integer, Integer> reduce(Tuple3<String, Integer, Integer> current,
+                                                       Tuple3<String, Integer, Integer> pre) throws Exception {
+
+            // emit reduced tuple (year, single, joint)
+            return new Tuple3<String, Integer, Integer>(current.f0, current.f1 + pre.f1, current.f2 + pre.f2);
+        }
+    }
+
+    // mapper: maps (yr, single, co-authored) to (yr, single, co-authored, %single, %co-authored)
+    private static class YearPercMapper implements MapFunction<Tuple3<String, Integer, Integer>,
+            Tuple6<String, Integer, Integer, Integer, Double, Double>> {
+
+        @Override
+        public Tuple6<String, Integer, Integer, Integer, Double, Double> map(
+                Tuple3<String, Integer, Integer> value) throws Exception {
+
+            // sum total single and co-authored to get total publications
+            Integer totalPub = value.f1 + value.f2;
+
+            // return (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
+            return new Tuple6<String, Integer, Integer, Integer, Double, Double>(
+                    value.f0, // year
+                    value.f1, // single author
+                    value.f2, // co-authored
+                    totalPub, // total publications
+                    new Double((value.f1 * 1.0) / totalPub), // percentage single author
+                    new Double((value.f2 * 1.0) / totalPub)  // percentage co-authored
+            );
         }
     }
 }
