@@ -1,7 +1,6 @@
 package stream;
 
 /*
-
 Handles/processes Kafka streams which contains publications using Apache Flink.
 
 -------------------
@@ -83,7 +82,6 @@ import org.apache.flink.streaming.connectors.cassandra.MapperOptions;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
 import org.apache.flink.util.Collector;
 import publication.OagPublication;
-import scala.Int;
 
 import java.lang.reflect.Type;
 import java.util.HashSet;
