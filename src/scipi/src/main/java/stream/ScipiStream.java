@@ -4,40 +4,61 @@ package stream;
 
 Handles/processes Kafka streams which contains publications using Apache Flink.
 
+-------------------
+CASSANDRA DB TABLES
+-------------------
+- Keyspace: scipi
+- Tables
+    > oagpub: publications coming from OAG [doi, title, publisher, venue, lang, keywords, year, authors]
+    > oagkw:  keyword count from OAG publications [keyword, count]
+    > oagfos: field of study count from OAG publications [fos, count]
+    > yrwisedist: single vs co-authored year wise distributions
+                  [year, total single, total co-authored, total publications,
+                  percentage single author, percentage co-authored]
+
 -------------
 PROCESS FLOW
 -------------
- * 0.0: consume data stream from kafka
- *
- * 1.0: map json strings passed from kafka to flink stream (POJO per publication)
- *      > 1.0.1: only publications written in english
- *      > 1.0.2: doi must not be empty as it is used as an id in CassandraDB
- *      > 1.0.3: title must not be empty
- *      > 1.0.4: at least a publisher or venue
- *      > 1.0.5: at least one keyword or field of study
- *          > 1.0.5.1: clean keywords and keep only valid ones
+- 0.0: consume data stream from kafka
+
+- 1.0: map json strings passed from kafka to flink stream (POJO per publication)
+      > 1.0.1: only publications written in english
+      > 1.0.2: doi must not be empty as it is used as an id in CassandraDB
+      > 1.0.3: title must not be empty
+      > 1.0.4: at least a publisher or venue
+      > 1.0.5: at least one keyword or field of study
+          > 1.0.5.1: clean keywords and keep only valid ones
             > 1.0.5.2: clean fos and keep only valid ones
- *      > 1.0.6: must have a valid year
- *      > 1.0.7: must have at least one author
+      > 1.0.6: must have a valid year
+      > 1.0.7: must have at least one author
             > 1.0.7.1: clean authors and keep only valid ones
- *
- * 1.1: persist publications to CassandraDB using data sink
- *
- * 2.0: [keyword count]: map OagPublication to Tuple<str,int> and count keyword occurrences
- *
- * 2.1: persist [keyword count] to CassandraDB using data sink
- *
- * 3.0: [field of study count]: map OagPublication to Tuple<str,int> and count fos occurrences
- *
- * 3.1: persist occurrences count for fos to CassandraDB using data sink
- *
- * 4.0: [year wise distribution]: (yr, tot single, tot joint, tot, %single, %joint)
- *                              - map OagPublication to Tuple<str, int> and count year occurrences
- *                              -
- *
- * 4.1: persist [year wise distribution] to CassandraDB using data sink
- *
- * */
+
+- 1.1: persist publications to CassandraDB using data sink
+
+- 2.0: [keyword count]: (keyword, count)
+                      - map OagPublication to (keyword, 1)
+                      - key by keyword
+                      - sum keyword on count
+
+- 2.1: persist [keyword count] to CassandraDB using data sink
+
+- 3.0: [field of study count]: (fos, count)
+                              - map OagPublication to (fos, 1)
+                              - key by fos
+                              - sum fos on count
+
+- 3.1: persist [field of study count count] to CassandraDB using data sink
+
+- 4.0: [year wise distribution]: (yr, tot single, tot joint, tot, %single, %joint)
+                              - map OagPublication to (yr, single, joint) -> using YearWiseMapper:flatMap
+                              - key by year
+                              - reduce (yr, single, joint) to (yr, tot single, tot joint)
+                                  -> using YearWiseReducer:reduce
+                              - map (yr, tot single, tot joint) to (yr, tot single, tot joint, tot, %single, %joint)
+                                  -> using YearPercMapper:map
+
+- 4.1: persist [year wise distribution] to CassandraDB using data sink
+*/
 
 // importing packages
 
