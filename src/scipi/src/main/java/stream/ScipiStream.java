@@ -121,66 +121,66 @@ public class ScipiStream {
 
         // 1.0: first we map strings from Kafka to OagPublication using OagPubMapper
         DataStream<OagPublication> oagPublications = kafkaData.flatMap(new OagPubMapper());
-//
-//        // 1.1: persist publications to CassandraDB using data sink
-//        CassandraSink.addSink(oagPublications)
-//                .setHost("127.0.0.1")
-//                .setMapperOptions(new MapperOptions() {
-//                    @Override
-//                    public Mapper.Option[] getMapperOptions() {
-//                        return new Mapper.Option[]{Mapper.Option.saveNullFields(true)};
-//                    }
-//                }).build();
-//
-//        // 2.0: map OagPublication to (keyword, count)
-//        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
-//                .flatMap(new OagKwMapper()) // map
-//                .keyBy(0)           // key by keyword
-//                .sum(1);       // sum the emitted 1
-//
-//        // 2.1: persist occurrences count for keyword to CassandraDB using data sink
-//        CassandraSink.addSink(oagKeywords)
-//                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
-//
-//        // 3.0: map OagPublication to (fos, count)
-//        DataStream<Tuple2<String, Integer>> oagFos = oagPublications
-//                .flatMap(new OagFosMapper())    // map
-//                .keyBy(0)               // key by field of study
-//                .sum(1);           // sum the emitted 1
-//
-//        // 3.1: persist occurrences count for fos to CassandraDB using data sink
-//        CassandraSink.addSink(oagFos)
-//                .setQuery("INSERT INTO scipi.oagfos(fos, count) values (?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
-//
-//        // 4.0: map OagPublication to (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
-//        DataStream<Tuple6<String, Integer, Integer, Integer, Double, Double>> yrWiseDist = oagPublications
-//                .map(new YearWiseMapper())       // map
-//                .keyBy(0)                // key by year published
-//                .reduce(new YearWiseReducer())   // reduce by counting single & co-authored
-//                .map(new YearPercMapper());
-//
-//        // 4.1: persist year-wise distribution to CassandraDB using data sink
-//        CassandraSink.addSink(yrWiseDist)
-//                .setQuery("INSERT INTO scipi.yrwisedist(year, single, joint, total, single_perc, joint_perc)" +
-//                        " values (?, ?, ?, ?, ?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
-//
-//        // 5.0: map OagPublication to (no. authors, no. publications, tot authors)
-//        DataStream<Tuple3<Integer, Integer, Integer>> authorshipPattern = oagPublications
-//                .map(new AuthorshipMapper())      // map  (no. authors, no. articles, tot no. authors)
-//                .keyBy(0)                 // key by no. authors (unit)
-//                .reduce(new AuthorshipReducer()); // reduce by adding up total publications and total authors
-//
-//        // 5.1: persist authorship patterns to CassandraDB using data sink
-//        CassandraSink.addSink(authorshipPattern)
-//                .setQuery("INSERT INTO scipi.authorptrn(author_unit, no_articles, no_authors) values (?, ?, ?);")
-//                .setHost("127.0.0.1")
-//                .build();
+
+        // 1.1: persist publications to CassandraDB using data sink
+        CassandraSink.addSink(oagPublications)
+                .setHost("127.0.0.1")
+                .setMapperOptions(new MapperOptions() {
+                    @Override
+                    public Mapper.Option[] getMapperOptions() {
+                        return new Mapper.Option[]{Mapper.Option.saveNullFields(true)};
+                    }
+                }).build();
+
+        // 2.0: map OagPublication to (keyword, count)
+        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
+                .flatMap(new OagKwMapper()) // map
+                .keyBy(0)           // key by keyword
+                .sum(1);       // sum the emitted 1
+
+        // 2.1: persist occurrences count for keyword to CassandraDB using data sink
+        CassandraSink.addSink(oagKeywords)
+                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
+                .setHost("127.0.0.1")
+                .build();
+
+        // 3.0: map OagPublication to (fos, count)
+        DataStream<Tuple2<String, Integer>> oagFos = oagPublications
+                .flatMap(new OagFosMapper())    // map
+                .keyBy(0)               // key by field of study
+                .sum(1);           // sum the emitted 1
+
+        // 3.1: persist occurrences count for fos to CassandraDB using data sink
+        CassandraSink.addSink(oagFos)
+                .setQuery("INSERT INTO scipi.oagfos(fos, count) values (?, ?);")
+                .setHost("127.0.0.1")
+                .build();
+
+        // 4.0: map OagPublication to (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
+        DataStream<Tuple6<String, Integer, Integer, Integer, Double, Double>> yrWiseDist = oagPublications
+                .map(new YearWiseMapper())       // map
+                .keyBy(0)                // key by year published
+                .reduce(new YearWiseReducer())   // reduce by counting single & co-authored
+                .map(new YearPercMapper());
+
+        // 4.1: persist year-wise distribution to CassandraDB using data sink
+        CassandraSink.addSink(yrWiseDist)
+                .setQuery("INSERT INTO scipi.yrwisedist(year, single, joint, total, single_perc, joint_perc)" +
+                        " values (?, ?, ?, ?, ?, ?);")
+                .setHost("127.0.0.1")
+                .build();
+
+        // 5.0: map OagPublication to (no. authors, no. publications, tot authors)
+        DataStream<Tuple3<Integer, Integer, Integer>> authorshipPattern = oagPublications
+                .map(new AuthorshipMapper())      // map  (no. authors, no. articles, tot no. authors)
+                .keyBy(0)                 // key by no. authors (unit)
+                .reduce(new AuthorshipReducer()); // reduce by adding up total publications and total authors
+
+        // 5.1: persist authorship patterns to CassandraDB using data sink
+        CassandraSink.addSink(authorshipPattern)
+                .setQuery("INSERT INTO scipi.authorptrn(author_unit, no_articles, no_authors) values (?, ?, ?);")
+                .setHost("127.0.0.1")
+                .build();
 
         // 6.0: map OagPublication to (year, no. authors, no. publications, avg no authors per paper AAP)
         DataStream<Tuple4<String, Integer, Integer, Double>> aap = oagPublications
