@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS scipi.oagkw(keyword text, count int, PRIMARY KEY(keyw
 CREATE TABLE IF NOT EXISTS scipi.oagfos(fos text, count int, PRIMARY KEY(fos));
 CREATE TABLE IF NOT EXISTS scipi.yrwisedist(year text, single int, joint int, total int, single_perc double, joint_perc double , PRIMARY KEY(year));
 
-KAFKA 
------
+Kafka topics 
+-------------
 bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic oag
 
 
