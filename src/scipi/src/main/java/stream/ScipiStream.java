@@ -36,9 +36,10 @@ import java.util.Set;
  *      > 1.0.4: at least a publisher or venue
  *      > 1.0.5: at least one keyword or field of study
  *          > 1.0.5.1: clean keywords and keep only valid ones
- *          >
+            > 1.0.5.2: clean fos and keep only valid ones
  *      > 1.0.6: must have a valid year
  *      > 1.0.7: must have at least one author
+            > 1.0.7.1: clean authors and keep onl valid ones
  *
  * 1.1: persist publications to CassandraDB using data sink
  *
@@ -139,6 +140,10 @@ public class ScipiStream {
         environment.execute("scipi stream processing");
     }
 
+    /***************************************************
+     USER DEFINED FUNCTIONS
+     **************************************************/
+
     // validates string attributes
     private static String validateStr(String str) {
         if (str == null) {
@@ -153,9 +158,32 @@ public class ScipiStream {
         return str.toLowerCase();
     }
 
-    /***************************************************
-     USER DEFINED FUNCTIONS
-     **************************************************/
+    // validates topics
+    private static Set<String> validateTopics(Set<String> topics) {
+
+        Set<String> vTopics = new HashSet<String>();
+        for (String topic : topics) {
+            topic = validateStr(topic);
+
+            // do not accept empty topic or topic with more than 30 char
+            if (topic == null || topic.length() > 30) {
+                continue;
+            }
+
+            // keep only letters, numbers and spaces
+            topic = topic.replaceAll("[^a-zA-Z0-9\\s]", "");
+            if (topic.isEmpty()) {
+                continue;
+            }
+
+            // append cleaned topic
+            if (!vTopics.contains(topic)) {
+                vTopics.add(topic);
+            }
+        }
+
+        return vTopics;
+    }
 
     // OagPublication JSON deserializer
     private static class PubDeserializer implements JsonDeserializer<OagPublication> {
@@ -202,6 +230,22 @@ public class ScipiStream {
                 }
             }
 
+            // get fos
+            HashSet<String> fos = null;
+
+            // check that json array is not empty
+            if (jsonObject.get("fos") != null) {
+                JsonArray jsonFos = jsonObject.get("fos").getAsJsonArray();
+                if (jsonFos.size() > 0) {
+                    fos = new HashSet<String>(jsonFos.size());
+                    for (JsonElement field : jsonFos) {
+                        if (!fos.contains(field)) {
+                            fos.add(field.getAsString());
+                        }
+                    }
+                }
+            }
+
             String doi = null;
             if (jsonObject.get("doi") != null) {
                 doi = jsonObject.get("doi").getAsString();
@@ -241,9 +285,11 @@ public class ScipiStream {
                     lang,
                     keywords,
                     year,
-                    authors);
+                    authors,
+                    fos);
         }
     }
+
 
     // mapper: string to POJO (OagPublication)
     public static final class OagPubMapper implements FlatMapFunction<String, OagPublication> {
@@ -312,40 +358,30 @@ public class ScipiStream {
             Set<String> keywords = publication.getKeywords();
             boolean validKeywords = keywords != null && keywords.size() > 0;
 
+            Set<String> fos = publication.getFos();
+            boolean validFos = fos != null && fos.size() > 0;
+
             // must have at least a keyword or field of study
-            if (!validKeywords) {
+            if (!validKeywords && !validFos) {
                 return;
             }
 
             // 1.0.5.1: clean keywords and keep only valid ones
-            Set<String> vKeywords = new HashSet<String>();
-            for (String keyword : keywords) {
-                keyword = validateStr(keyword);
+            Set<String> vKeywords = validKeywords ? validateTopics(keywords) : null;
 
-                // do not accept empty keywords or keyword with more than 30 char
-                if (keyword == null || keyword.length() > 30) {
-                    continue;
-                }
+            // 1.0.5.2: clean fos and keep only valid ones
+            Set<String> vFos = validFos ? validateTopics(fos) : null;
 
-                // keep only letters, numbers and spaces
-                keyword = keyword.replaceAll("[^a-zA-Z0-9\\s]", "");
-                if (keyword.isEmpty()) {
-                    continue;
-                }
-
-                // append cleaned keyword
-                if (!vKeywords.contains(keyword)) {
-                    vKeywords.add(keyword);
-                }
-            }
-
-            // check that at least some keywords remain after cleaned
-            if (vKeywords.size() <= 0) {
+            // check that at least some keywords or fos remain after cleaned
+            if ((vKeywords == null || vKeywords.size() <= 0) && (vFos == null || vFos.size() <= 0)) {
                 return;
             }
 
             // set to cleaned keywords
             publication.setKeywords(vKeywords);
+
+            // set to cleaned fields of study
+            publication.setFos(vFos);
 
             // 1.0.6: validate year
             String year = validateStr(publication.getYear());
@@ -356,6 +392,43 @@ public class ScipiStream {
             }
 
             // 1.0.6: validate authors
+            Set<String> authors = publication.getAuthors();
+            boolean validAuthors = authors != null && authors.size() > 0;
+
+            // must have at least one author
+            if (!validAuthors) {
+                return;
+            }
+
+            // 1.0.7.1: clean authors and keep only valid ones
+            Set<String> vAuthors = new HashSet<String>();
+            for (String author : authors) {
+                author = validateStr(author);
+
+                // do not accept empty author
+                if (author == null) {
+                    continue;
+                }
+
+                // keep only letters, numbers and spaces
+                author = author.replaceAll("[^a-zA-Z0-9\\s]", "");
+                if (author.isEmpty()) {
+                    continue;
+                }
+
+                // append cleaned author name
+                if (!vAuthors.contains(author)) {
+                    vAuthors.add(author);
+                }
+            }
+
+            // check that at least some authors remain after cleaned
+            if (vAuthors.size() <= 0) {
+                return;
+            }
+
+            // set to cleaned authors
+            publication.setAuthors(vAuthors);
 
             // collect publication
             out.collect(publication);

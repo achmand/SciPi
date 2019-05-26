@@ -36,6 +36,9 @@ public class OagPublication {
     @Column(name = "authors")
     private Set<String> authors;
 
+    @Column(name="fos")
+    private Set<String> fos;
+
     public OagPublication() {
     }
 
@@ -46,7 +49,8 @@ public class OagPublication {
                           String lang,
                           Set<String> keywords,
                           String year,
-                          Set<String> authors
+                          Set<String> authors,
+                          Set<String> fos
     ) {
         this.setDoi(doi);
         this.setTitle(title);
@@ -56,6 +60,7 @@ public class OagPublication {
         this.setKeywords(keywords);
         this.setYear(year);
         this.setAuthors(authors);
+        this.setFos(fos);
     }
 
     public String getDoi() {
@@ -120,5 +125,13 @@ public class OagPublication {
 
     public void setAuthors(Set<String> authors) {
         this.authors = authors;
+    }
+
+    public Set<String> getFos() {
+        return fos;
+    }
+
+    public void setFos(Set<String> fos) {
+        this.fos = fos;
     }
 }

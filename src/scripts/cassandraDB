@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS scipi.oagfos(fos text, count int, PRIMARY KEY(fos));
 CREATE TABLE IF NOT EXISTS scipi.yrwisedist(year text, count int, PRIMARY KEY(year));
 
 
-CREATE TABLE IF NOT EXISTS scipi.oagpub(doi text, title text, publisher text, venue text, lang text, keywords set<text>, year text, authors set<text>, PRIMARY KEY(doi));
+CREATE TABLE IF NOT EXISTS scipi.oagpub(doi text, title text, publisher text, venue text, lang text, keywords set<text>, year text, authors set<text>, fos set<text> ,PRIMARY KEY(doi));
 
 
 CREATE TABLE IF NOT EXISTS scipi.oagpub(id text, title text, venue text, year text, keywords set<text>, publisher text, PRIMARY KEY(id));
