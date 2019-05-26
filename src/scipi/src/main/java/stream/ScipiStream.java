@@ -1,6 +1,7 @@
 package stream;
 
 /*
+
 Handles/processes Kafka streams which contains publications using Apache Flink.
 
 -------------------
@@ -193,6 +194,7 @@ public class ScipiStream {
                 .setHost("127.0.0.1")
                 .build();
 
+        // execute stream processing
         environment.execute("scipi stream processing");
     }
 

@@ -7,6 +7,13 @@ CREATE TABLE IF NOT EXISTS scipi.yrwisedist(year text, single int, joint int, to
 CREATE TABLE IF NOT EXISTS scipi.authorptrn(author_unit int, no_articles int, no_authors int ,PRIMARY KEY(author_unit));
 CREATE TABLE IF NOT EXISTS scipi.aap(year text, no_articles int, no_authors int, avg_author_paper double, PRIMARY KEY(year));
 
+TRUNCATE scipi.oagpub;
+TRUNCATE scipi.oagkw;
+TRUNCATE scipi.oagfos;
+TRUNCATE scipi.yrwisedist;
+TRUNCATE scipi.authorptrn;
+TRUNCATE scipi.aap;
+
 Kafka topics 
 -------------
 bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic oag
