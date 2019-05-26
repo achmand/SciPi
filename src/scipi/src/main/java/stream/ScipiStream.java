@@ -50,7 +50,7 @@ PROCESS FLOW
 - 3.1: persist [field of study count count] to CassandraDB using data sink
 
 - 4.0: [year wise distribution]: (yr, tot single, tot joint, tot, %single, %joint)
-                              - map OagPublication to (yr, single, joint) -> using YearWiseMapper:flatMap
+                              - map OagPublication to (yr, single, joint) -> using YearWiseMapper:map
                               - key by year
                               - reduce (yr, single, joint) to (yr, tot single, tot joint)
                                   -> using YearWiseReducer:reduce
@@ -58,6 +58,9 @@ PROCESS FLOW
                                   -> using YearPercMapper:map
 
 - 4.1: persist [year wise distribution] to CassandraDB using data sink
+
+- 5.0: [authorship patterns]: (no. authors, no. publications, tot authors, %publications)
+
 */
 
 // importing packages
@@ -127,7 +130,7 @@ public class ScipiStream {
                     }
                 }).build();
 
-        // 2.0: map OagPublication to Tuple<str,int> and count keyword occurrences
+        // 2.0: map OagPublication to (keyword, count)
         DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
                 .flatMap(new OagKwMapper()) // map
                 .keyBy(0)           // key by keyword
@@ -139,7 +142,7 @@ public class ScipiStream {
                 .setHost("127.0.0.1")
                 .build();
 
-        // 3.0: map OagPublication to Tuple<str,int> and count fos occurrences
+        // 3.0: map OagPublication to (fos, count)
         DataStream<Tuple2<String, Integer>> oagFos = oagPublications
                 .flatMap(new OagFosMapper())    // map
                 .keyBy(0)               // key by field of study
@@ -153,7 +156,7 @@ public class ScipiStream {
 
         // 4.0: map OagPublication to (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
         DataStream<Tuple6<String, Integer, Integer, Integer, Double, Double>> yrWiseDist = oagPublications
-                .flatMap(new YearWiseMapper())   // map
+                .map(new YearWiseMapper())       // map
                 .keyBy(0)                // key by year published
                 .reduce(new YearWiseReducer())   // reduce by counting single & co-authored
                 .map(new YearPercMapper());
@@ -162,6 +165,18 @@ public class ScipiStream {
         CassandraSink.addSink(yrWiseDist)
                 .setQuery("INSERT INTO scipi.yrwisedist(year, single, joint, total, single_perc, joint_perc)" +
                         " values (?, ?, ?, ?, ?, ?);")
+                .setHost("127.0.0.1")
+                .build();
+
+        // 5.0: map OagPublication to (no. authors, no. publications, tot authors)
+        DataStream<Tuple3<Integer, Integer, Integer>> authorshipPattern = oagPublications
+                .map(new AuthorshipMapper())      // map  (no. authors, no. articles, tot no. authors)
+                .keyBy(0)                 // key by no. authors (unit)
+                .reduce(new AuthorshipReducer()); // reduce by adding up total publications and total authors
+
+        // 5.1: persist authorship patterns to CassandraDB using data sink
+        CassandraSink.addSink(authorshipPattern)
+                .setQuery("INSERT INTO scipi.authorptrn(author_unit, no_articles, no_authors) values (?, ?, ?);")
                 .setHost("127.0.0.1")
                 .build();
 
@@ -509,10 +524,10 @@ public class ScipiStream {
     }
 
     // mapper: OagPublication to Tuple<String, int> to count occurrences (single vs co-authored publications)
-    private static class YearWiseMapper implements FlatMapFunction<OagPublication, Tuple3<String, Integer, Integer>> {
+    private static class YearWiseMapper implements MapFunction<OagPublication, Tuple3<String, Integer, Integer>> {
 
         @Override
-        public void flatMap(OagPublication publication, Collector<Tuple3<String, Integer, Integer>> out) throws Exception {
+        public Tuple3<String, Integer, Integer> map(OagPublication publication) throws Exception {
 
             // get year from OagPublication
             String year = publication.getYear();
@@ -526,7 +541,7 @@ public class ScipiStream {
             Integer joint = authorsCount > 1 ? 1 : 0;
 
             // emit (year, single, joint)
-            out.collect(new Tuple3<String, Integer, Integer>(year, single, joint));
+            return new Tuple3<String, Integer, Integer>(year, single, joint);
         }
     }
 
@@ -562,6 +577,39 @@ public class ScipiStream {
                     new Double((value.f1 * 1.0) / totalPub), // percentage single author
                     new Double((value.f2 * 1.0) / totalPub)  // percentage co-authored
             );
+        }
+    }
+
+    // mapper: maps OagPublication to (no. authors, no. articles, tot no. authors)
+    private static class AuthorshipMapper implements MapFunction<OagPublication,
+            Tuple3<Integer, Integer, Integer>> {
+
+        @Override
+        public Tuple3<Integer, Integer, Integer> map(OagPublication publication) throws Exception {
+
+            // no of authors who worked on this publication (unit)
+            Integer noAuthors = publication.getAuthors().size();
+
+            // return (no. authors, no. articles, tot no.authors)
+            return new Tuple3<Integer, Integer, Integer>(noAuthors, 1, noAuthors);
+        }
+    }
+
+    // reducer: reduce by adding up total publications and total authors
+    private static class AuthorshipReducer implements ReduceFunction<Tuple3<Integer, Integer, Integer>> {
+
+        @Override
+        public Tuple3<Integer, Integer, Integer> reduce(Tuple3<Integer, Integer, Integer> current,
+                                                        Tuple3<Integer, Integer, Integer> prev) throws Exception {
+
+            // sum up total publications
+            Integer totPublications = current.f1 + prev.f1;
+
+            // total publications * no.authors (unit)
+            Integer totAuthors = totPublications * current.f0;
+
+            // emit reduced tuple (no. authors, no. articles, tot no.authors)
+            return new Tuple3<Integer, Integer, Integer>(current.f0, totPublications, totAuthors);
         }
     }
 }
