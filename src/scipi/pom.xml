@@ -61,6 +61,7 @@
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-gelly_2.12</artifactId>
             <version>1.8.0</version>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 </project>

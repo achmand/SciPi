@@ -1,8 +1,12 @@
 package batch;
 
 enum PubEdgeType {
-    COAUTHORED,
-    PUBLISHED
+    COAUTHORED, // > Author -> Co-Author (COAUTHORED)
+    WRITTEN,    // > Author -> Paper (WRITTEN)
+    PUBLISHED,  // > Paper  -> Publisher (PUBLISHED)
+    PRESENTED,  // > Paper  -> Venue (PRESENTED)
+    TAGGED,     // > Paper  -> Keyword (TAGGED)
+    DOMAIN,     // > Paper  -> Field of study (DOMAIN)
 }
 
 public class PubEdgeValue {
