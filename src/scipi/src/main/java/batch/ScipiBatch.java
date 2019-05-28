@@ -15,20 +15,32 @@ PROCESS FLOW
 // importing packages
 
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.Session;
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.operators.Order;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.utils.DataSetUtils;
 import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.batch.connectors.cassandra.CassandraInputFormat;
+import org.apache.flink.batch.connectors.cassandra.CassandraOutputFormatBase;
 import org.apache.flink.batch.connectors.cassandra.CassandraPojoInputFormat;
+import org.apache.flink.batch.connectors.cassandra.CassandraTupleOutputFormat;
 import org.apache.flink.graph.Edge;
 import org.apache.flink.graph.Graph;
+import org.apache.flink.graph.Vertex;
+import org.apache.flink.graph.VertexJoinFunction;
+import org.apache.flink.graph.library.LabelPropagation;
 import org.apache.flink.streaming.connectors.cassandra.ClusterBuilder;
-import org.apache.flink.types.NullValue;
 import org.apache.flink.util.Collector;
 import publication.OagPublication;
+import scala.Int;
 
+import java.util.HashMap;
 import java.util.Set;
 
 public class ScipiBatch {
@@ -47,34 +59,96 @@ public class ScipiBatch {
         // register parameters globally so it can be available for each node in the cluster
         environment.getConfig().setGlobalJobParameters(parameters);
 
-        // 0.0: set CassandraDB input format for OagPublication
-        CassandraPojoInputFormat cassandraPojoInputFormat = new CassandraPojoInputFormat<OagPublication>(
-                "SELECT * FROM scipi.oagpub;",
-                new ClusterBuilder() {
-                    @Override
-                    protected Cluster buildCluster(Cluster.Builder builder) {
-                        return builder.addContactPoint("127.0.0.1").build();
-                    }
-                },
-                OagPublication.class
+        // create cassandra builder
+        ClusterBuilder cassandraBuilder = new ClusterBuilder() {
+            @Override
+            public Cluster buildCluster(Cluster.Builder builder) {
+                return builder.addContactPoint("127.0.0.1")
+                        .build();
+            }
+        };
+
+        // truncate previous top 100 keywords before processing/getting top 100
+        Session session = cassandraBuilder.getCluster().connect("scipi");
+        session.execute("TRUNCATE topkw");
+        session.close();
+
+        // 0.0: batch processing keyword and field of study (sort and save top 100)
+        CassandraInputFormat keywordsInputFormat = new CassandraInputFormat<Tuple2<String, Integer>>(
+                "SELECT keyword, count FROM scipi.oagkw;",
+                cassandraBuilder
         );
 
-        // gets the publications from CassandraDB using the specified InputFormat and TypeInformation for OagPublication POJO
-        TypeInformation<OagPublication> typeInformation = TypeInformation.of(new TypeHint<OagPublication>() {
-        });
+        // type information for keywords
+        TypeInformation<Tuple2<String, Integer>> keywordTypeInformation = TypeInformation.of(
+                new TypeHint<Tuple2<String, Integer>>() {
+                });
 
-        DataSet<OagPublication> publications = environment.createInput(cassandraPojoInputFormat, typeInformation);
+        DataSet<Tuple2<String, Integer>> sortedKeywords = environment
+                .createInput(keywordsInputFormat, keywordTypeInformation)
+                .sortPartition(1, Order.DESCENDING)
+                .setParallelism(1)
+                .first(100);
 
-        // 1.0: create a graph from the publications gathered from the database
-        DataSet<Edge<String, PubEdgeValue>> publicationEdges = publications
-                .flatMap(new PubEdgeMapper())
-                .distinct(); //
+        sortedKeywords.output(new CassandraTupleOutputFormat<Tuple2<String, Integer>>(
+                "INSERT INTO scipi.topkw(keyword, count) values (?, ?);",
+                cassandraBuilder));
 
-        // creates the undirected publication graph
-        Graph<String, NullValue, PubEdgeValue> publicationGraph =
-                Graph.fromDataSet(publicationEdges, environment).getUndirected();
+//        // 0.0: set CassandraDB input format for OagPublication
+//        CassandraPojoInputFormat cassandraPojoInputFormat = new CassandraPojoInputFormat<OagPublication>(
+//                "SELECT * FROM scipi.oagpub;",
+//                new ClusterBuilder() {
+//                    @Override
+//                    protected Cluster buildCluster(Cluster.Builder builder) {
+//                        return builder.addContactPoint("127.0.0.1").build();
+//                    }
+//                },
+//                OagPublication.class
+//        );
+//
+//        // gets the publications from CassandraDB using the specified InputFormat and TypeInformation for OagPublication POJO
+//        TypeInformation<OagPublication> typeInformation = TypeInformation.of(new TypeHint<OagPublication>() {
+//        });
+//
+//        DataSet<OagPublication> publications = environment.createInput(cassandraPojoInputFormat, typeInformation);
+//
+//
+//        // 1.0: create a graph from the publications gathered from the database
+//        DataSet<Edge<String, PubEdgeValue>> publicationEdges = publications
+//                .flatMap(new PubEdgeMapper())
+//                .distinct(); //
+//
+//        // creates the undirected publication graph
+//        Graph<String, Long, PubEdgeValue> publicationGraph =
+//                Graph.fromDataSet(publicationEdges, new MapFunction<String, Long>() {
+//                    @Override
+//                    public Long map(String s) throws Exception {
+//                        return 1L;
+//                    }
+//                }, environment).getUndirected();
+//
+//
+//        // detect dense communities of interest using label propagation
+//        // initialize each vertex with a unique numeric label
+//        DataSet<Tuple2<String, Long>> idsWithInitialLabels = DataSetUtils
+//                .zipWithUniqueId(publicationGraph.getVertexIds())
+//                .map(new MapFunction<Tuple2<Long, String>, Tuple2<String, Long>>() {
+//                    @Override
+//                    public Tuple2<String, Long> map(Tuple2<Long, String> value) throws Exception {
+//                        return new Tuple2<String, Long>(value.f1, value.f0);
+//                    }
+//                });
+//
+//        DataSet<Vertex<String, Long>> verticesWithCommunity = publicationGraph
+//                .joinWithVertices(idsWithInitialLabels, new VertexJoinFunction<Long, Long>() {
+//                    @Override
+//                    public Long vertexJoin(Long aLong, Long aLong2) throws Exception {
+//                        return aLong2;
+//                    }
+//                }).run(new LabelPropagation<String, Long, PubEdgeValue>(100));
+//
+//        verticesWithCommunity.writeAsCsv("/home/delinvas/repos/SciPi/output");
 
-        
         // execute batch processing
         environment.execute("scipi batch processing");
     }
@@ -107,6 +181,15 @@ public class ScipiBatch {
             Set<String> fos = publication.getFos();
             Set<String> authors = publication.getAuthors();
 
+
+            if (fos == null) {
+                return;
+            }
+
+            if (!fos.contains("computer science")) {
+                return;
+            }
+
             // if publisher is not null or empty create edge (PUBLISHED)
             if (publisher != null && !publisher.isEmpty()) {
 
@@ -130,30 +213,30 @@ public class ScipiBatch {
             }
 
             // if keywords is not null or empty create edges (TAGGED)
-            if (keywords != null && keywords.size() > 0) {
-                for (String keyword: keywords){
-
-                    // create edge between paper -> keyword (TAGGED)
-                    Edge<String, PubEdgeValue> taggedEdge = new Edge<String, PubEdgeValue>();
-                    taggedEdge.setSource(title);
-                    taggedEdge.setTarget(keyword);
-                    taggedEdge.setValue(new PubEdgeValue(PubEdgeType.TAGGED, 1));
-                    out.collect(taggedEdge);
-                }
-            }
-
-            // if field of study is not not null or empty create edges (DOMAIN)
-            if (fos != null && fos.size() > 0) {
-                for (String field: fos){
-
-                    // create edge between paper -> field (DOMAIN)
-                    Edge<String, PubEdgeValue> domainEdge = new Edge<String, PubEdgeValue>();
-                    domainEdge.setSource(title);
-                    domainEdge.setTarget(field);
-                    domainEdge.setValue(new PubEdgeValue(PubEdgeType.DOMAIN, 1));
-                    out.collect(domainEdge);
-                }
-            }
+//            if (keywords != null && keywords.size() > 0) {
+//                for (String keyword: keywords){
+//
+//                    // create edge between paper -> keyword (TAGGED)
+//                    Edge<String, PubEdgeValue> taggedEdge = new Edge<String, PubEdgeValue>();
+//                    taggedEdge.setSource(title);
+//                    taggedEdge.setTarget(keyword);
+//                    taggedEdge.setValue(new PubEdgeValue(PubEdgeType.TAGGED, 1));
+//                    out.collect(taggedEdge);
+//                }
+//            }
+//
+//            // if field of study is not not null or empty create edges (DOMAIN)
+//            if (fos != null && fos.size() > 0) {
+//                for (String field: fos){
+//
+//                    // create edge between paper -> field (DOMAIN)
+//                    Edge<String, PubEdgeValue> domainEdge = new Edge<String, PubEdgeValue>();
+//                    domainEdge.setSource(title);
+//                    domainEdge.setTarget(field);
+//                    domainEdge.setValue(new PubEdgeValue(PubEdgeType.DOMAIN, 1));
+//                    out.collect(domainEdge);
+//                }
+//            }
 
             // add edges between authors (COAUTHORED)
             // add edges between author and paper (PUBLISHED)

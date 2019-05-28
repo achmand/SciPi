@@ -2,9 +2,12 @@
 
 ###### importing dependencies #############################################
 import pandas as pd
-import matplotlib.pyplot as plt 
+import cufflinks as cf
+import plotly.graph_objs as go
 from cassandra.cluster import Cluster
 from IPython.core.display import display, HTML
+from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
+init_notebook_mode(connected=True)
 
 # TODO: write comments for methods and init  + close session !!!!
 # TODO: style tables 
@@ -16,7 +19,8 @@ class ScipiVisual():
 
     # CassandraDB tables 
     cassandra_tbls = {
-        "yrdist": "yrwisedist" # holds year-wise distribution: single author vs co-authored
+        "yrdist": "yrwisedist", # holds year-wise distribution: single author vs co-authored
+        "topkw": "topkw", # holds the top 100 keywords by count
     }
 
     def __init__(self, cassandra_points):
@@ -31,6 +35,13 @@ class ScipiVisual():
 
         # set default fetch size to unlimited 
         self.session.default_fetch_size = None            
+
+    def plot_bubble_topics(self):
+        table = self.cassandra_tbls["topkw"]
+        df = self.session.execute("SELECT keyword, count FROM " + table + ";",
+                                  timeout=None)._current_rows
+        
+        display(df)
 
     def plot_yr_dist_pub(self, years, figsize=(15,8)):
 
@@ -67,31 +78,36 @@ class ScipiVisual():
         last_year = result.tail(1).index.values[0]
         tbl_title = "Single Authored vs co-authored publications from {} to {}.".format(first_year, last_year)
 
-        # set table style and render in html
-        result_html = (
-            result.style
-            .set_caption(tbl_title)
-            .render()
-        )
-        
-        # display dataframe result  
-        display(HTML(result_html))
+        trace = go.Table(
+                header=dict(values=["year"] + list(result.columns),
+                fill = dict(color='#C2D4FF'),
+                align = ['left'] * 5),
+        cells=dict(values=[result.index.values, 
+                          result["Single authored"],
+                          result["Joint authored"],
+                          result["Total Publications"],
+                          result["% of Single authored publications"],
+                          result["% of Joint authored publications"]],
+               fill = dict(color='#F5F8FF'),
+               align = ['left'] * 5))
 
-        # plot single authored vs joint authored 
-        result["Single authored"].plot(label="Single authored", 
-                                       figsize=figsize, 
-                                       fontsize=12,
-                                       c="r")
-        
-        result["Joint authored"].plot(label="Co-authored", 
-                                      c="g")
+        table_result = [trace] 
+        iplot(table_result, filename = "pandas_table")
 
-        plt.title(tbl_title)
-        plt.xticks(range(years), result.index.values, fontsize=12, rotation=45)
-        plt.ylabel("Total Publications", fontsize=14)
-        plt.xlabel("Year", fontsize=14)
-        plt.legend()
-        plt.show()                
+        # plot single authored vs joint authored (total publications)
+        iplot(result[["Single authored", "Joint authored"]].iplot(asFigure=True,
+                                       kind="scatter",
+                                       xTitle="Years",
+                                       yTitle="Total Publications",
+                                       title=tbl_title))     
+
+        # plot single authored vs joint authored (percentage)
+        iplot(result[["% of Single authored publications",
+                      "% of Joint authored publications"]].iplot(asFigure=True,
+                                       kind="scatter",
+                                       xTitle="Years",
+                                       yTitle="(%) Publications",
+                                       title=tbl_title))       
 
     def pandas_factory(self, colnames, rows):
         return pd.DataFrame(rows, columns=colnames)
