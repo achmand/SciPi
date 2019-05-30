@@ -20,9 +20,10 @@ class ScipiVisual():
 
     # CassandraDB tables 
     cassandra_tbls = {
+        "topkw": "topkw", # holds the top 100 keywords by count
         "authorship": "authorptrn", # holds authorship patterns 
         "yrdist": "yrwisedist", # holds year-wise distribution: single author vs co-authored
-        "topkw": "topkw", # holds the top 100 keywords by count
+        "avgauthors" : "aap" # holds the avg number of authors per paper (AAP)
     }
 
     def __init__(self, cassandra_points):
@@ -37,6 +38,9 @@ class ScipiVisual():
 
         # set default fetch size to unlimited 
         self.session.default_fetch_size = None            
+
+    def pandas_factory(self, colnames, rows):
+        return pd.DataFrame(rows, columns=colnames)
 
     def plot_bubble_topics(self):
         table = self.cassandra_tbls["topkw"]
@@ -106,16 +110,15 @@ class ScipiVisual():
         table_plot_result = [trace] 
         iplot(table_plot_result, filename = "pandas_table")
 
-        # plot authorship patterns
-        # iplot(table_result[["% of Single authored publications",
-        #               "% of Joint authored publications"]].iplot(asFigure=True,
-        #                                kind="scatter",
-        #                                xTitle="Years",
-        #                                yTitle="(%) Publications",
-        #                                title="TESTING"))       
+        # plot authorship patterns 
+        iplot(table_result[["% of total publications"]].iplot(
+                                       asFigure=True,
+                                       kind="scatter",
+                                       xTitle="No. of authors (unit)",
+                                       yTitle="(%) Publications",
+                                       title="Authorship Pattern")) 
 
-
-    def plot_yr_dist_pub(self, years, figsize=(15,8)):
+    def plot_yr_dist(self, years, figsize=(15,8)):
 
         # get results from year-wise distribution as a pandas dataframe 
         table = self.cassandra_tbls["yrdist"]
@@ -148,7 +151,7 @@ class ScipiVisual():
         # set table title 
         first_year = result.head(1).index.values[0]
         last_year = result.tail(1).index.values[0]
-        tbl_title = "Single Authored vs co-authored publications from {} to {}.".format(first_year, last_year)
+        tbl_title = "Single Authored vs Co-Authored Publications from {} to {}.".format(first_year, last_year)
 
         # show table using pyplot 
         trace = go.Table(
@@ -168,7 +171,9 @@ class ScipiVisual():
         iplot(table_result, filename = "pandas_table")
 
         # plot single authored vs joint authored (total publications)
-        iplot(result[["Single authored", "Joint authored"]].iplot(asFigure=True,
+        iplot(result[["Single authored", 
+                      "Joint authored"]].iplot(
+                                       asFigure=True,
                                        kind="scatter",
                                        xTitle="Years",
                                        yTitle="Total Publications",
@@ -176,12 +181,66 @@ class ScipiVisual():
 
         # plot single authored vs joint authored (percentage)
         iplot(result[["% of Single authored publications",
-                      "% of Joint authored publications"]].iplot(asFigure=True,
+                      "% of Joint authored publications"]].iplot(
+                                       asFigure=True,
                                        kind="scatter",
                                        xTitle="Years",
                                        yTitle="(%) Publications",
                                        title=tbl_title))       
 
-    def pandas_factory(self, colnames, rows):
-        return pd.DataFrame(rows, columns=colnames)
+    def plot_aap(self, years):
 
+        # get results from aap as a pandas dataframe 
+        table = self.cassandra_tbls["avgauthors"]
+        df = self.session.execute("SELECT year, no_articles, no_authors, avg_author_paper FROM " + table + ";",
+                                  timeout=None)._current_rows
+        
+        # set year column as index
+        df.set_index("year", inplace=True)
+        
+         # sort dataframe by year 
+        df.sort_values(by=["year"], 
+                       ascending=False, 
+                       inplace=True)
+
+        # round AAP to 2 decimal places 
+        df["avg_author_paper"] = round(df["avg_author_paper"], 2)
+
+        # set column names 
+        df.columns = ["Total no. of papers (P)", 
+                      "Total no. of authorship (A)", 
+                      "Avg. no of authors per paper (AAP = A/P)"]
+
+        # get only the latest n years 
+        result = df.head(years).sort_values(by=["year"], 
+                                            ascending=True).copy()
+
+        # set table title 
+        first_year = result.head(1).index.values[0]
+        last_year = result.tail(1).index.values[0]
+        tbl_title = "Avg. Number of Authors per Paper (AAP) from {} to {}.".format(first_year, last_year)
+
+        # show table using pyplot 
+        trace = go.Table(
+                header=dict(values=["year"] + list(result.columns),
+                fill = dict(color='#C2D4FF'),
+                align = ['left'] * 5),
+        cells=dict(values=[result.index.values, 
+                          result["Total no. of papers (P)"],
+                          result["Total no. of authorship (A)"],
+                          result["Avg. no of authors per paper (AAP = A/P)"]],
+               fill = dict(color='#F5F8FF'),
+               align = ['left'] * 5))
+
+        layout = dict(width=800, height=700)
+        table_result = [trace] 
+        fig = dict(data=table_result, layout=layout)
+        iplot(fig, filename = "pandas_table")
+
+        # plot avg. number of authors per paper (AAP)
+        iplot(result[["Avg. no of authors per paper (AAP = A/P)"]].iplot(
+                                       asFigure=True,
+                                       kind="scatter",
+                                       xTitle="Years",
+                                       yTitle="AAP",
+                                       title=tbl_title))    
