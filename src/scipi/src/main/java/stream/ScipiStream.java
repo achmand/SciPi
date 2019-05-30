@@ -91,6 +91,10 @@ import java.util.HashSet;
 import java.util.Properties;
 import java.util.Set;
 
+
+// TODO -> Publisher check length
+// TODO -> Remove any punctuation
+
 public class ScipiStream {
 
     // used to parse JSON to POJO
@@ -673,7 +677,7 @@ public class ScipiStream {
 
     // mapper: maps (year, no. authors, no. publications) to (year, no. authors, no. publications, AAP)
     private static class AapAvgMapper implements MapFunction<Tuple3<String, Integer, Integer>,
-            Tuple4<String, Integer, Integer, Double>>{
+            Tuple4<String, Integer, Integer, Double>> {
 
         @Override
         public Tuple4<String, Integer, Integer, Double> map(Tuple3<String, Integer, Integer> value) throws Exception {

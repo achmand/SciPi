@@ -7,24 +7,22 @@ enum PubVertexType {
     PUBLISHER
 }
 
-public class PubVertexValue implements Comparable<PubVertexValue> {
+public class PubVertexValue {
 
-    private Long label;
+    private Long vertexValue;
     private PubVertexType vertexType;
 
-    public PubVertexValue(){}
-
-    public PubVertexValue(Long label, PubVertexType vertexType){
-        this.setLabel(label);
+    public PubVertexValue(Long vertexValue, PubVertexType vertexType){
+        this.setVertexValue(vertexValue);
         this.setVertexType(vertexType);
     }
 
-    public Long getLabel() {
-        return label;
+    public Long getVertexValue() {
+        return vertexValue;
     }
 
-    public void setLabel(Long label) {
-        this.label = label;
+    public void setVertexValue(Long vertexName) {
+        this.vertexValue = vertexName;
     }
 
     public PubVertexType getVertexType() {
@@ -33,10 +31,5 @@ public class PubVertexValue implements Comparable<PubVertexValue> {
 
     public void setVertexType(PubVertexType vertexType) {
         this.vertexType = vertexType;
-    }
-
-    @Override
-    public int compareTo(PubVertexValue o) {
-        return this.getLabel().compareTo(o.getLabel());
     }
 }
