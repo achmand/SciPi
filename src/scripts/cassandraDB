@@ -1,5 +1,6 @@
 CassandraDB tables 
 -------------------
+CREATE KEYSPACE IF NOT EXISTS scipi WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'};
 CREATE TABLE IF NOT EXISTS scipi.oagpub(doi text, title text, publisher text, venue text, lang text, keywords set<text>, year text, authors set<text>, fos set<text> ,PRIMARY KEY(doi));
 CREATE TABLE IF NOT EXISTS scipi.oagkw(keyword text, count int, PRIMARY KEY(keyword));
 CREATE TABLE IF NOT EXISTS scipi.oagfos(fos text, count int, PRIMARY KEY(fos));

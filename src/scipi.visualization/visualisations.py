@@ -9,6 +9,7 @@ from IPython.core.display import display, HTML
 from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
 init_notebook_mode(connected=True)
 
+# TODO: Check this out: https://www.natureindex.com/news-blog/paper-authorship-goes-hyper
 # TODO: write comments for methods and init  + close session !!!!
 # TODO: style tables 
 
@@ -19,6 +20,7 @@ class ScipiVisual():
 
     # CassandraDB tables 
     cassandra_tbls = {
+        "authorship": "authorptrn", # holds authorship patterns 
         "yrdist": "yrwisedist", # holds year-wise distribution: single author vs co-authored
         "topkw": "topkw", # holds the top 100 keywords by count
     }
@@ -42,6 +44,76 @@ class ScipiVisual():
                                   timeout=None)._current_rows
         
         display(df)
+
+    def plot_authorship_ptrn(self, cutoff):
+        
+        # get results from authorship patterns as a pandas dataframe 
+        table = self.cassandra_tbls["authorship"]
+        df = self.session.execute("SELECT author_unit, no_articles, no_authors FROM " + table + ";",
+                                  timeout=None)._current_rows
+    
+        # set author (unit) as index 
+        df.set_index("author_unit", inplace=True)
+
+         # sort dataframe by author (unit) 
+        df.sort_values(by=["author_unit"], 
+                       ascending=True, 
+                       inplace=True)
+
+
+        # set column names & index name 
+        df.index.names = ["No. authors (unit)"]
+        df.columns = ["No. of publications",
+                      "No. of authors"]
+
+        # table result 
+        table_result = df.head(cutoff) 
+
+        # compute stats for greater than cutoff 
+        cutoff_result = df[df.index>cutoff].copy()
+        cutoff_publications = cutoff_result["No. of publications"].sum()
+        cutoff_authors = cutoff_result["No. of authors"].sum()
+        table_result.loc[cutoff + 1] = [cutoff_publications, cutoff_authors]
+        
+        # set index
+        index_list = table_result.index.tolist()
+        index_list[cutoff] = ">" + str(cutoff)
+        table_result.index = index_list
+
+        # compute and set % of total articles 
+        total_articles = table_result["No. of publications"].sum()
+        table_result["% of total publications"] = round((table_result["No. of publications"] / total_articles) * 100, 2)
+
+        # compute cum % of total publications
+        table_result["Cum.(%) of total publications"] = round(table_result["% of total publications"].cumsum(),1)
+
+        # reset index name 
+        table_result.index.names = ["No. authors (unit)"]
+
+        # show authorship patterns table using pyplot 
+        trace = go.Table(
+                header=dict(values=["No. authors (unit)"] + list(table_result.columns),
+                fill = dict(color='#C2D4FF'),
+                align = ['left'] * 5),
+        cells=dict(values=[table_result.index.values, 
+                          table_result["No. of publications"],
+                          table_result["No. of authors"],
+                          table_result["% of total publications"],
+                          table_result["Cum.(%) of total publications"]],
+               fill = dict(color='#F5F8FF'),
+               align = ['left'] * 5))
+
+        table_plot_result = [trace] 
+        iplot(table_plot_result, filename = "pandas_table")
+
+        # plot authorship patterns
+        # iplot(table_result[["% of Single authored publications",
+        #               "% of Joint authored publications"]].iplot(asFigure=True,
+        #                                kind="scatter",
+        #                                xTitle="Years",
+        #                                yTitle="(%) Publications",
+        #                                title="TESTING"))       
+
 
     def plot_yr_dist_pub(self, years, figsize=(15,8)):
 
@@ -78,6 +150,7 @@ class ScipiVisual():
         last_year = result.tail(1).index.values[0]
         tbl_title = "Single Authored vs co-authored publications from {} to {}.".format(first_year, last_year)
 
+        # show table using pyplot 
         trace = go.Table(
                 header=dict(values=["year"] + list(result.columns),
                 fill = dict(color='#C2D4FF'),

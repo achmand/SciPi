@@ -65,6 +65,7 @@ PROCESS FLOW
 
 // importing packages
 
+import com.datastax.driver.core.Cluster;
 import com.datastax.driver.mapping.Mapper;
 import com.google.gson.*;
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -79,6 +80,7 @@ import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.cassandra.CassandraSink;
+import org.apache.flink.streaming.connectors.cassandra.ClusterBuilder;
 import org.apache.flink.streaming.connectors.cassandra.MapperOptions;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
 import org.apache.flink.util.Collector;
@@ -114,6 +116,15 @@ public class ScipiStream {
         Properties properties = new Properties();
         properties.setProperty("bootstrap.servers", "localhost:9092"); // IP address where Kafka is running
 
+        // set properties for cassandra
+        ClusterBuilder cassandraBuilder = new ClusterBuilder() {
+            @Override
+            public Cluster buildCluster(Cluster.Builder builder) {
+                return builder.addContactPoint("127.0.0.1")
+                        .build();
+            }
+        };
+
         // 0.0: consume data stream from kafka
         DataStream<String> kafkaData = environment.addSource(
                 new FlinkKafkaConsumer<String>("oag", new SimpleStringSchema(), properties));
@@ -123,7 +134,7 @@ public class ScipiStream {
 
         // 1.1: persist publications to CassandraDB using data sink
         CassandraSink.addSink(oagPublications)
-                .setHost("127.0.0.1")
+                .setClusterBuilder(cassandraBuilder)
                 .setMapperOptions(new MapperOptions() {
                     @Override
                     public Mapper.Option[] getMapperOptions() {
@@ -139,8 +150,8 @@ public class ScipiStream {
 
         // 2.1: persist occurrences count for keyword to CassandraDB using data sink
         CassandraSink.addSink(oagKeywords)
+                .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
-                .setHost("127.0.0.1")
                 .build();
 
         // 3.0: map OagPublication to (fos, count)
@@ -151,8 +162,8 @@ public class ScipiStream {
 
         // 3.1: persist occurrences count for fos to CassandraDB using data sink
         CassandraSink.addSink(oagFos)
+                .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.oagfos(fos, count) values (?, ?);")
-                .setHost("127.0.0.1")
                 .build();
 
         // 4.0: map OagPublication to (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
@@ -164,9 +175,9 @@ public class ScipiStream {
 
         // 4.1: persist year-wise distribution to CassandraDB using data sink
         CassandraSink.addSink(yrWiseDist)
+                .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.yrwisedist(year, single, joint, total, single_perc, joint_perc)" +
                         " values (?, ?, ?, ?, ?, ?);")
-                .setHost("127.0.0.1")
                 .build();
 
         // 5.0: map OagPublication to (no. authors, no. publications, tot authors)
@@ -177,8 +188,8 @@ public class ScipiStream {
 
         // 5.1: persist authorship patterns to CassandraDB using data sink
         CassandraSink.addSink(authorshipPattern)
+                .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.authorptrn(author_unit, no_articles, no_authors) values (?, ?, ?);")
-                .setHost("127.0.0.1")
                 .build();
 
         // 6.0: map OagPublication to (year, no. authors, no. publications, avg no authors per paper AAP)
@@ -190,8 +201,8 @@ public class ScipiStream {
 
         // 6.1: persist AAP to CassandraDB using data sink
         CassandraSink.addSink(aap)
+                .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.aap(year, no_authors, no_articles, avg_author_paper) values (?, ?, ?, ?);")
-                .setHost("127.0.0.1")
                 .build();
 
         // execute stream processing

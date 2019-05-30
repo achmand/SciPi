@@ -11,9 +11,8 @@ enum PubEdgeType {
 
 public class PubEdgeValue {
 
-    public PubEdgeType edgeType;
-
-    public Integer weight;
+    private PubEdgeType edgeType;
+    private Integer weight;
 
     public PubEdgeValue(){}
 
