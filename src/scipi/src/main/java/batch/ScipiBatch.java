@@ -9,15 +9,17 @@ Handles/processes data in batch found in CassandraDB using Apache Flink.
 // importing packages
 
 import com.datastax.driver.core.Cluster;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.operators.Order;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.tuple.Tuple5;
+import org.apache.flink.api.java.tuple.Tuple6;
 import org.apache.flink.api.java.utils.DataSetUtils;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.batch.connectors.cassandra.CassandraPojoInputFormat;
@@ -27,13 +29,11 @@ import org.apache.flink.graph.Vertex;
 import org.apache.flink.graph.VertexJoinFunction;
 import org.apache.flink.graph.asm.translate.TranslateFunction;
 import org.apache.flink.graph.library.CommunityDetection;
-import org.apache.flink.graph.utils.GraphUtils;
 import org.apache.flink.streaming.connectors.cassandra.ClusterBuilder;
-import org.apache.flink.types.NullValue;
 import org.apache.flink.util.Collector;
-import org.apache.kafka.common.protocol.types.Field;
 import publication.OagPublication;
 
+import java.util.HashSet;
 import java.util.Set;
 
 public class ScipiBatch {
@@ -99,6 +99,9 @@ public class ScipiBatch {
                 .fromDataSet(networkVertices, networkEdges, environment)
                 .getUndirected();
 
+        // create dataset made up of (VertexId, UniqueLabel)
+        // these unique labels will be the initial values for each vertex when applying
+        // the CommunityDetection algorithm
         DataSet<Tuple2<String, Long>> vertexIdsInitialLabels = DataSetUtils
                 .zipWithUniqueId(networkGraph.getVertexIds())
                 .map(new MapFunction<Tuple2<Long, String>, Tuple2<String, Long>>() {
@@ -108,6 +111,10 @@ public class ScipiBatch {
                     }
                 });
 
+        // > firstly we translate the original network graph by translating the vertex value
+        // to Long, this is done since CommunityDetection algorithm requires that vertex value is of type Long
+        // > after doing so, the vertices are joined with the dataset <VertexId, UniqueLabel> to set
+        // a unique label for each vertex, then the CommunityDetection algorithm is called
         Graph<String, Long, Double> communityGraph = networkGraph
                 .translateVertexValues(new TranslateFunction<PubVertexValue, Long>() {
                     @Override
@@ -122,16 +129,70 @@ public class ScipiBatch {
                     }
                 }).run(new CommunityDetection<String>(100, 0.5));
 
-        DataSet<Tuple3<String, String, Long>> testingVerticesWithLabel = networkGraph
-                .joinWithVertices(communityGraph.getVerticesAsTuple2(),
-                        new VertexJoinFunction<PubVertexValue, Long>() {
-                            @Override
-                            public PubVertexValue vertexJoin(PubVertexValue pubVertexValue,
-                                                             Long label) throws Exception {
-                                pubVertexValue.setVertexValue(label);
-                                return pubVertexValue;
-                            }
-                        }).getVertices()
+        // - now we will get the top three communities/labels after the algorithm is finished
+        // > map vertices to (Label, 1)
+        // > group by label
+        // > sum on second value in the tuple
+        // > we define a community if it has at least fifteen vertices with the same label, filtered by count
+        DataSet<Tuple2<Long, Long>> communityLabelsCount = communityGraph
+                .getVertices()
+                .map(new MapFunction<Vertex<String, Long>, Tuple2<Long, Long>>() {
+                    @Override
+                    public Tuple2<Long, Long> map(Vertex<String, Long> vertex) throws Exception {
+
+                        // emit (CommunityLabel, 1)
+                        return new Tuple2<Long, Long>(vertex.f1, 1L);
+                    }
+                })
+                .groupBy(0) // group by CommunityLabel
+                .sum(1) // sum all occurrences
+                .filter(new FilterFunction<Tuple2<Long, Long>>() {
+                    @Override
+                    public boolean filter(Tuple2<Long, Long> value) throws Exception {
+                        return value.f1 > 14;
+                    }
+                });
+
+        // get the most dense communities/labels (top three)
+        final HashSet<Long> denseLabels = new HashSet<Long>(communityLabelsCount
+                .sortPartition(1, Order.DESCENDING)
+                .setParallelism(1)
+                .first(3)
+                .map(new MapFunction<Tuple2<Long, Long>, Long>() {
+                    @Override
+                    public Long map(Tuple2<Long, Long> value) throws Exception {
+                        return value.f0;
+                    }
+                }).collect());
+
+        // after applying CommunityDetection we need to translate back the Vertex value to PubVertexValue
+        // > filter only vertices which are part of the top three communities
+        // > translate vertex value from Long to PubVertexValue and set type to NONE
+        // > then join on the original graph and set the translated vertex value type to the initial one
+        Graph<String, PubVertexValue, Double> denseCommunityGraph = communityGraph
+                .filterOnVertices(new FilterFunction<Vertex<String, Long>>() {
+                    @Override
+                    public boolean filter(Vertex<String, Long> vertex) throws Exception {
+                        return denseLabels.contains(vertex.f1);
+                    }
+                })
+                .translateVertexValues(new TranslateFunction<Long, PubVertexValue>() {
+                    @Override
+                    public PubVertexValue translate(Long communityLabel, PubVertexValue o) throws Exception {
+                        return new PubVertexValue(communityLabel, PubVertexType.NONE);
+                    }
+                }).joinWithVertices(networkGraph.getVerticesAsTuple2(), new VertexJoinFunction<PubVertexValue, PubVertexValue>() {
+                    @Override
+                    public PubVertexValue vertexJoin(PubVertexValue communityVertex,
+                                                     PubVertexValue originalVertex) throws Exception {
+                        originalVertex.setVertexValue(communityVertex.getVertexValue());
+                        return originalVertex;
+                    }
+                });
+
+        // get vertices which are part of the top three communities
+        DataSet<Tuple3<String, String, Long>> denseCommunityVertices = denseCommunityGraph
+                .getVertices()
                 .map(new MapFunction<Vertex<String, PubVertexValue>, Tuple3<String, String, Long>>() {
                     @Override
                     public Tuple3<String, String, Long> map(
@@ -143,127 +204,31 @@ public class ScipiBatch {
                     }
                 });
 
-        DataSet<Tuple2<String, Long>> testingVertices = communityGraph
-                .getVertices()
-                .map(new MapFunction<Vertex<String, Long>,
-                        Tuple2<String, Long>>() {
+        // get edges which are part of the vertices found in the top three communities
+        DataSet<Tuple2<String, String>> denseCommunityEdges = denseCommunityGraph
+                .getEdges()
+                .map(new MapFunction<Edge<String, Double>, Tuple2<String, String>>() {
                     @Override
-                    public Tuple2<String, Long> map(Vertex<String, Long> vertex) throws Exception {
-                        return new Tuple2<String, Long>(
-                                vertex.f0,
-                                vertex.f1);
+                    public Tuple2<String, String> map(Edge<String, Double> edge) throws Exception {
+                        return new Tuple2<String, String>(edge.getSource(), edge.getTarget());
                     }
-                });
+                }).distinct() // must only get unique edges (since undirected)
+                .first(200); // get only first 200 edges
 
-        testingVertices.writeAsCsv("/home/delinvas/repos/SciPi/output");
-        testingVerticesWithLabel.writeAsCsv("/home/delinvas/repos/SciPi/output2");
+        DataSet<Tuple6<String, String, Long, String, String, Long>> denseCommunityVerticesEdges =
+                denseCommunityEdges.join(denseCommunityVertices)
+                        .where(0)
+                        .equalTo(0)
+                        .projectSecond(0, 1, 2).projectFirst(1)
+                        .join(denseCommunityVertices)
+                        .where(3)
+                        .equalTo(0)
+                        .projectFirst(0, 1, 2).projectSecond(0, 1, 2);
 
-        // TODO -> Only testing with authors, papers and publishers
-        // map OagPublication dataset to dataset of Edge<PubVertexId, Double>
-//        DataSet<Edge<PubVertexId, Double>> networkEdges = publications.flatMap(new NetworkEdgeMapper());
-////
-//        Graph<PubVertexId, Long, Double> networkGraph = Graph
-//                .fromDataSet(networkEdges, new MapFunction<PubVertexId, Long>() {
-//                    @Override
-//                    public Long map(PubVertexId pubVertexId) throws Exception { // initially set vertex value to 1
-//                        return 1L;
-//                    }
-//                }, environment)
-//                .getUndirected(); // gets undirected
+        denseCommunityEdges.writeAsCsv("/home/delinvas/repos/SciPi/output1");
+        denseCommunityVerticesEdges.writeAsCsv("/home/delinvas/repos/SciPi/output2");
+        communityLabelsCount.writeAsCsv("/home/delinvas/repos/SciPi/output3");
 
-
-//        // create publication network graph from provided edges
-//        Graph<PubVertexId, Long, Double> networkGraph = Graph
-//                .fromDataSet(networkEdges, new MapFunction<PubVertexId, Long>() {
-//                    @Override
-//                    public Long map(PubVertexId pubVertexId) throws Exception { // initially set vertex value to 1
-//                        return 1L;
-//                    }
-//                }, environment)
-//                .getUndirected(); // gets undirected
-
-
-//        DataSet<Edge<String, Double>> networkEdges = publications.flatMap(new NetworkEdgeMapper2());
-//
-//        Graph<String, Long, Double> networkGraph = Graph
-//                .fromDataSet(networkEdges2, new MapFunction<String, Long>() {
-//                    @Override
-//                    public Long map(String pubVertexId) throws Exception { // initially set vertex value to 1
-//                        return 1L;
-//                    }
-//                }, environment)
-//                .getUndirected(); // gets undirected
-
-
-        // X.0: now to apply the CommunityDetection algorithm we must have a Graph
-        // with Vertex values as Long type and Edges values as Double
-
-        // we need to set the a unique Long for vertices so CommunityDetection algorithm to work
-        // first we create a dataset of (PubVertexId, Long) and create a unique id
-        // this unique id will be used as a label in the algorithm
-//        DataSet<Tuple2<PubVertexId, Long>> vertexIdsInitialLabels = DataSetUtils
-//                .zipWithUniqueId(networkGraph.getVertexIds())
-//                .map(new MapFunction<Tuple2<Long, PubVertexId>, Tuple2<PubVertexId, Long>>() {
-//                    @Override
-//                    public Tuple2<PubVertexId, Long> map(Tuple2<Long, PubVertexId> value) throws Exception {
-//                        return new Tuple2<PubVertexId, Long>(value.f1, value.f0);
-//                    }
-//                });
-
-        // join with vertices and set value of each vertex to the unique generated id
-        // which will be used as a label in the algorithm
-//        Graph<PubVertexId, Long, Double> networkGraphWithLabels = networkGraph
-//                .joinWithVertices(vertexIdsInitialLabels, new VertexJoinFunction<Long, Long>() {
-//                    @Override
-//                    public Long vertexJoin(Long defaultLabel,
-//                                           Long uniqueLabel) throws Exception {
-//                        return uniqueLabel;
-//                    }
-//                }).run(new CommunityDetection<PubVertexId>(100, 0.5));
-
-        // now that each vertex value is set to a label, any two vertices with the same label
-        // belong the the same community
-//        DataSet<Tuple3<String, String, Double>> communityEdges = networkGraphWithLabels
-//                .getEdges()
-//                .map(new MapFunction<Edge<PubVertexId, Double>, Tuple3<String, String, Double>>() {
-//                    @Override
-//                    public Tuple3<String, String, Double> map(
-//                            Edge<PubVertexId, Double> edge) throws Exception {
-//                        return new Tuple3<String, String, Double>(
-//                                edge.f0.getVertexName(),
-//                                edge.f1.getVertexName(),
-//                                edge.f2);
-//                    }
-//                }).distinct(); // only get unique edges (since we are using undirected graph)
-
-//        DataSet<Tuple3<String, String, Long>> communityVertices = networkGraph
-//                .getVertices()
-//                .map(new MapFunction<Vertex<String, Long>,
-//                        Tuple3<String, String, Long>>() {
-//                    @Override
-//                    public Tuple3<String, String, Long> map(Vertex<String, Long> vertex) throws Exception {
-//                        return new Tuple3<String, String, Long>(
-//                                vertex.f0,
-//                                "",
-//                                vertex.f1);
-//                    }
-//                });
-
-//        DataSet<Tuple3<String, String, Long>> communityVertices = networkGraph
-//                .getVertices()
-//                .map(new MapFunction<Vertex<PubVertexId, Long>,
-//                        Tuple3<String, String, Long>>() {
-//                    @Override
-//                    public Tuple3<String, String, Long> map(Vertex<PubVertexId, Long> vertex) throws Exception {
-//                        return new Tuple3<String, String, Long>(
-//                                vertex.f0.getVertexName(),
-//                                "",
-//                                vertex.f1);
-//                    }
-//                });
-
-//        communityEdges.writeAsCsv("/home/delinvas/repos/SciPi/output");
-//        communityVertices.writeAsCsv("/home/delinvas/repos/SciPi/output2");
         environment.execute("scipi batch processing");
     }
 

@@ -1,7 +1,11 @@
 """Class which visualises Scipi data found on different sources (CassandraDB)."""
 
 ###### importing dependencies #############################################
+import matplotlib.pyplot as plt
+
+import csv
 import pandas as pd
+import networkx as nx
 import cufflinks as cf
 import plotly.graph_objs as go
 from cassandra.cluster import Cluster
@@ -18,12 +22,21 @@ class ScipiVisual():
     # only one keyspace is used to interact with scipi datae
     _keyspace = "scipi"
 
+    # TODO -> add _ prefix indicates private
     # CassandraDB tables 
     cassandra_tbls = {
         "topkw": "topkw", # holds the top 100 keywords by count
         "authorship": "authorptrn", # holds authorship patterns 
         "yrdist": "yrwisedist", # holds year-wise distribution: single author vs co-authored
         "avgauthors" : "aap" # holds the avg number of authors per paper (AAP)
+    }
+
+    # vertex type symbols 
+    _v_symbols = {
+        "AUTHOR": "circle",
+        "PAPER": "diamond",
+        "VENUE": "triangle-up",
+        "PUBLISHER": "pentagon"
     }
 
     def __init__(self, cassandra_points):
@@ -63,7 +76,6 @@ class ScipiVisual():
         df.sort_values(by=["author_unit"], 
                        ascending=True, 
                        inplace=True)
-
 
         # set column names & index name 
         df.index.names = ["No. authors (unit)"]
@@ -244,3 +256,109 @@ class ScipiVisual():
                                        xTitle="Years",
                                        yTitle="AAP",
                                        title=tbl_title))    
+
+    def plot_community(self, layout, community_colors):
+        
+        # get edges result 
+        with open("output2.txt") as f:
+            data=[tuple(line) for line in csv.reader(f)]
+
+        # create a new graph 
+        G = nx.DiGraph()
+
+        # create a dictionary to hold colors for each community 
+        colors_dist = {}
+
+        # loop in all edges 
+        for edge in data:
+
+            vertex_a = edge[0]
+            vertex_a_type = edge[1]
+            vertex_a_label = edge[2]
+            G.add_node(vertex_a, type=vertex_a_type, community=vertex_a_label)    
+            
+            if vertex_a_label not in colors_dist:
+                colors_dist[vertex_a_label] = community_colors[len(colors_dist)]
+
+            vertex_b = edge[3]
+            vertex_b_type = edge[4]
+            vertex_b_label = edge[5]
+            G.add_node(vertex_b, type=vertex_b_type, community=vertex_b_label)    
+
+            if vertex_b_label not in colors_dist:
+                colors_dist[vertex_b_label] = community_colors[len(colors_dist)]
+
+            G.add_edge(vertex_a, vertex_b)
+
+
+        pos = nx.nx_agraph.graphviz_layout(G, prog=layout)
+        for n, p in pos.items():
+            G.node[n]["pos"] = p
+
+        # create the node trace 
+        node_trace = go.Scatter(
+            x=[],
+            y=[],
+            text=[],
+            mode="markers",
+            hoverinfo="text",
+            marker=dict(
+                color=[],
+                size=12,
+                symbol = [],
+                line=dict(width=2)))
+
+        # set node properties to node trace 
+        for node in G.nodes():
+
+            # get current node 
+            tmp_node = G.node[node]
+            
+            # set positions in trace
+            x, y = tmp_node["pos"]
+            node_trace["x"] += tuple([x])
+            node_trace["y"] += tuple([y])
+
+            # set color in trace
+            c = colors_dist[tmp_node["community"]]
+            node_trace["marker"]["color"] += tuple([c])
+
+            # set info in trace 
+            # NODE TYPE: NAME 
+            node_type = tmp_node["type"]
+            node_info = "{}: {}".format(node_type, node)
+            node_trace["text"]+=tuple([node_info])
+
+            # set marker for each node 
+            s = self._v_symbols[node_type]
+            node_trace["marker"]["symbol"] += tuple([s])
+        
+        # create edge trace 
+        edge_trace = go.Scatter(
+            x=[],
+            y=[],
+            line=dict(width=0.5, color="#888"),
+            hoverinfo='none',
+            mode='lines')
+
+        # set edge properties to edge trace 
+        for edge in G.edges():
+            x0, y0 = G.node[edge[0]]["pos"]
+            x1, y1 = G.node[edge[1]]["pos"]
+            edge_trace["x"] += tuple([x0, x1, None])
+            edge_trace["y"] += tuple([y0, y1, None])
+
+        # plot graph network 
+        title ="<br>Dense Communities in Publications Network ({})".format(layout)
+        fig = go.Figure(data=[edge_trace, node_trace],
+             layout=go.Layout(
+                title=title,
+                titlefont=dict(size=16),
+                showlegend=False,
+                hovermode="closest",
+                margin=dict(b=20,l=5,r=5,t=40),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
+
+        # show plot 
+        iplot(fig, filename='networkx')

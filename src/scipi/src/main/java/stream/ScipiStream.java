@@ -93,7 +93,6 @@ import java.util.Set;
 
 
 // TODO -> Publisher check length
-// TODO -> Remove any punctuation
 
 public class ScipiStream {
 
@@ -223,7 +222,8 @@ public class ScipiStream {
             return null;
         }
 
-        str = str.trim();
+        // keep only letters, numbers and spaces
+        str = str.replaceAll("[^a-zA-Z0-9\\s]", "").trim();
         if (str.isEmpty()) {
             return null;
         }
@@ -244,7 +244,7 @@ public class ScipiStream {
             }
 
             // keep only letters, numbers and spaces
-            topic = topic.replaceAll("[^a-zA-Z0-9\\s]", "");
+            topic = topic.replaceAll("[^a-zA-Z0-9\\s]", "").trim();
             if (topic.isEmpty()) {
                 continue;
             }

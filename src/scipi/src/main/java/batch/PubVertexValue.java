@@ -1,6 +1,7 @@
 package batch;
 
 enum PubVertexType {
+    NONE,
     AUTHOR,
     PAPER,
     VENUE,
