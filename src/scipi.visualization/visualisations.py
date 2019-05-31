@@ -1,8 +1,6 @@
 """Class which visualises Scipi data found on different sources (CassandraDB)."""
 
 ###### importing dependencies #############################################
-import matplotlib.pyplot as plt
-
 import csv
 import pandas as pd
 import networkx as nx
@@ -42,8 +40,8 @@ class ScipiVisual():
     def __init__(self, cassandra_points):
         
         # connecting to cluster & setting up session
-        cluster = Cluster(cassandra_points)
-        self.session = cluster.connect() 
+        self.cluster = Cluster(cassandra_points)
+        self.session = self.cluster.connect() 
         self.session.set_keyspace(self._keyspace) # setting up keyspace
 
         # set a custom row factory 
@@ -362,3 +360,9 @@ class ScipiVisual():
 
         # show plot 
         iplot(fig, filename='networkx')
+
+    
+    def close(self):
+
+        # closes connections/sessions with cassandraDB cluster 
+        self.cluster.shutdown()
