@@ -34,7 +34,8 @@ class ScipiVisual():
         "AUTHOR": "circle",
         "PAPER": "diamond",
         "VENUE": "triangle-up",
-        "PUBLISHER": "pentagon"
+        "PUBLISHER": "pentagon",
+        "KEYWORD": "hexagram-dot"
     }
 
     def __init__(self, cassandra_points):
@@ -347,6 +348,105 @@ class ScipiVisual():
 
         # plot graph network 
         title ="<br>Dense Communities in Publications Network (Layout: {})".format(layout)
+        fig = go.Figure(data=[edge_trace, node_trace],
+             layout=go.Layout(
+                title=title,
+                titlefont=dict(size=16),
+                showlegend=False,
+                hovermode="closest",
+                margin=dict(b=20,l=5,r=5,t=40),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
+
+        # show plot 
+        iplot(fig, filename="networkx")
+
+        # print total nodes & edges
+        print("No. Nodes: {}\nNo. Edges: {}".format(G.number_of_nodes(), G.number_of_edges()))
+
+    # TODO -> show table too 
+    def plot_author_keyword(self, layout):
+        
+        # get author to keywords edges result 
+        with open("association_kw_authors.csv") as f:
+            data=[tuple(line) for line in csv.reader(f)]
+
+        # create a new graph 
+        G = nx.Graph()
+
+        # loop in all edges (author -> keyword)
+        for edge in data:
+            
+            # get author & add vertex 
+            vertex_a = edge[1]
+            G.add_node(vertex_a, type="AUTHOR")    
+            
+            # get keyword & add vertex 
+            vertex_b = edge[0]
+            G.add_node(vertex_b, type="KEYWORD")    
+
+            # get weight for edge
+            edge_weight = edge[2]
+            
+            # add an edge between the author and keyword  
+            G.add_edge(vertex_a, vertex_b, weight=edge_weight)
+
+        # generate position for vertices according to the layout defined
+        pos = nx.nx_agraph.graphviz_layout(G, prog=layout)
+        for n, p in pos.items():
+            G.node[n]["pos"] = p
+
+        # create the node trace 
+        node_trace = go.Scatter(
+            x=[],
+            y=[],
+            text=[],
+            mode="markers",
+            hoverinfo="text",
+            marker=dict(
+                color="red",
+                size=12,
+                symbol = [],
+                line=dict(width=2)))
+
+        # set node properties to node trace 
+        for node in G.nodes():
+
+            # get current node 
+            tmp_node = G.node[node]
+            
+            # set positions in trace
+            x, y = tmp_node["pos"]
+            node_trace["x"] += tuple([x])
+            node_trace["y"] += tuple([y])
+
+            # set info in trace 
+            # NODE TYPE: NAME 
+            node_type = tmp_node["type"]
+            node_info = "{}<br>{}".format(node_type, node)
+            node_trace["text"]+=tuple([node_info])
+
+            # set marker for each node 
+            s = self._v_symbols[node_type]
+            node_trace["marker"]["symbol"] += tuple([s])
+
+        # create edge trace 
+        edge_trace = go.Scatter(
+            x=[],
+            y=[],
+            line=dict(width=0.5, color="#888"),
+            hoverinfo="none",
+            mode="lines")
+
+        # set edge properties to edge trace 
+        for edge in G.edges():
+            x0, y0 = G.node[edge[0]]["pos"]
+            x1, y1 = G.node[edge[1]]["pos"]
+            edge_trace["x"] += tuple([x0, x1, None])
+            edge_trace["y"] += tuple([y0, y1, None])
+
+        # plot graph network 
+        title ="<br>Author and keyword associations (Layout: {})".format(layout)
         fig = go.Figure(data=[edge_trace, node_trace],
              layout=go.Layout(
                 title=title,
