@@ -10,6 +10,7 @@ Handles/processes data in batch found in CassandraDB using Apache Flink.
 
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.Session;
+import info.debatty.java.stringsimilarity.Cosine;
 import org.apache.flink.api.common.functions.*;
 import org.apache.flink.api.common.operators.Order;
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -34,6 +35,7 @@ import org.apache.flink.graph.asm.translate.TranslateFunction;
 import org.apache.flink.graph.bipartite.BipartiteEdge;
 import org.apache.flink.graph.bipartite.BipartiteGraph;
 import org.apache.flink.graph.library.CommunityDetection;
+import org.apache.flink.streaming.api.functions.windowing.delta.CosineDistance;
 import org.apache.flink.streaming.connectors.cassandra.ClusterBuilder;
 import org.apache.flink.types.NullValue;
 import org.apache.flink.util.Collector;
@@ -124,114 +126,162 @@ public class ScipiBatch {
         definedKeywords.add("article");
         definedKeywords.add("etude comparative");
 
-        // TODO -> For testing purposes
-        final Random rand = new Random();
-        final Integer usageThreshold = 9;
+        // X.0: define & discover associations between authors and keywords (taken from the title)
 
-        DataSet<BipartiteEdge<String, String, Integer>> authorKeywordsEdges = publications
-                .flatMap(new FlatMapFunction<OagPublication, Tuple3<String, String, Integer>>() {
+        final Cosine cosineSimilarity = new Cosine(3);
+        final Double similarityThreshold = 0.5;
+        DataSet<Tuple3<String, String, Double>> authorKeywordAssociation = publications
+                .flatMap(new FlatMapFunction<OagPublication, Tuple3<String, String, Double>>() {
+
                     @Override
                     public void flatMap(OagPublication publication,
-                                        Collector<Tuple3<String, String, Integer>> out) throws Exception {
+                                        Collector<Tuple3<String, String, Double>> out) throws Exception {
 
-                        // get keywords from publication
-                        Set<String> keywords = publication.getKeywords();
+                        // get title from publication
+                        String title = publication.getTitle();
 
-                        // since we will perform clustering based on keywords
-                        // if keyword set is empty move on
-                        if (keywords == null || keywords.isEmpty()) {
-                            return;
-                        }
-
-                        // intersect defined keyword set and keywords found in this publication
-                        // we need to create a new HashSet since retainAll() will remove any elements
-                        // which are not found in the second collection
-                        Set<String> intersection = new HashSet<String>(definedKeywords);
-                        intersection.retainAll(keywords);
-
-                        // check if the intersection set contains any elements
-                        if (intersection.isEmpty()) {
-                            return; // publication does not contain keywords which were specified
-                        }
-
-                        // get the authors set
+                        // get publication authors
                         Set<String> authors = publication.getAuthors();
-                        for (String author : authors) {
-                            for (String keyword : intersection) {
 
-                                // TODO -> For now use random since not enough data
-                                Integer n = rand.nextInt(9) + 1;
+                        for (String keyword : definedKeywords) {
 
-                                // emit (Author, Keyword, 1)
-                                out.collect(new Tuple3<String, String, Integer>(author, keyword, n));
+                            // compute cosine similarity between keyword and paper title
+                            double similarity = cosineSimilarity.similarity(keyword, title);
+
+                            // check if it over the threshold
+                            if (similarity > similarityThreshold) {
+
+                                // loop in each author
+                                for (String author : authors) {
+                                    out.collect(new Tuple3<String, String, Double>(keyword, author, similarity));
+                                }
                             }
                         }
                     }
-                }).groupBy(new KeySelector<Tuple3<String, String, Integer>, Tuple2<String, String>>() {
+                }).groupBy(new KeySelector<Tuple3<String, String, Double>, Tuple2<String, String>>() {
                     @Override
-                    public Tuple2 getKey(Tuple3<String, String, Integer> value) throws Exception {
+                    public Tuple2 getKey(Tuple3<String, String, Double> value) throws Exception {
                         return Tuple2.of(value.f0, value.f1);
                     }
-                }).reduce(new ReduceFunction<Tuple3<String, String, Integer>>() {
+                }).reduce(new ReduceFunction<Tuple3<String, String, Double>>() {
                     @Override
-                    public Tuple3<String, String, Integer> reduce(Tuple3<String, String, Integer> current,
-                                                                  Tuple3<String, String, Integer> pre) throws Exception {
-
-                        return new Tuple3<String, String, Integer>(current.f0, current.f1, current.f2 + pre.f2);
+                    public Tuple3<String, String, Double> reduce(
+                            Tuple3<String, String, Double> current,
+                            Tuple3<String, String, Double> pre) throws Exception {
+                        return new Tuple3<String, String, Double>(current.f0, current.f1, current.f2 + pre.f2);
                     }
-                }).filter(new FilterFunction<Tuple3<String, String, Integer>>() {
-                    @Override
-                    public boolean filter(Tuple3<String, String, Integer> edge) throws Exception {
-                        return (edge.f2 > usageThreshold);
-                    }
-                }).map(new MapFunction<Tuple3<String, String, Integer>,
-                        BipartiteEdge<String, String, Integer>>() {
-                    @Override
-                    public BipartiteEdge<String, String, Integer> map(
-                            Tuple3<String, String, Integer> value) throws Exception {
-                        return new BipartiteEdge<String, String, Integer>(value.f0, value.f1, value.f2);
-                    }
-                });
+                }).first(100);
 
-        DataSet<Vertex<String, NullValue>> topAuthorVertices = authorKeywordsEdges.
-                map(new MapFunction<BipartiteEdge<String, String, Integer>, Vertex<String, NullValue>>() {
-                    @Override
-                    public Vertex<String, NullValue> map(BipartiteEdge<String, String, Integer> edge) throws Exception {
-                        Vertex<String, NullValue> v = new Vertex<String, NullValue>();
-                        v.setId(edge.getTopId());
-                        return v;
-                    }
-                }).distinct();
+        authorKeywordAssociation.writeAsCsv("/home/delinvas/repos/SciPi/association_kw_authors.csv");
 
-        DataSet<Vertex<String, NullValue>> bottomKeywordVertices = environment.fromCollection(definedKeywords)
-                .map(new MapFunction<String, Vertex<String, NullValue>>() {
-                    @Override
-                    public Vertex<String, NullValue> map(String value) throws Exception {
-                        Vertex<String, NullValue> v = new Vertex<String, NullValue>();
-                        v.setId(value);
-                        return v;
-                    }
-                });
-
-        BipartiteGraph<String, String, NullValue, NullValue, Integer> authorsKeywordGraph = BipartiteGraph
-                .fromDataSet(topAuthorVertices, bottomKeywordVertices, authorKeywordsEdges, environment);
-
-        Graph<String, NullValue, Tuple2<Integer, Integer>> similarAuthorsGraph = authorsKeywordGraph
-                .projectionTopSimple();
-
-        DataSet<Tuple2<String, String>> similarAuthorsEdges = similarAuthorsGraph
-                .getEdgesAsTuple3()
-                .map(new MapFunction<Tuple3<String, String, Tuple2<Integer, Integer>>,
-                        Tuple2<String, String>>() {
-                    @Override
-                    public Tuple2<String, String> map(Tuple3<String, String, Tuple2<Integer, Integer>>
-                                                              value) throws Exception {
-                        return new Tuple2<String, String>(value.f0, value.f1);
-                    }
-                })
-                .first(200);
-
-        similarAuthorsEdges.writeAsCsv("/home/delinvas/repos/SciPi/clustering_authors.csv");
+//        // TODO -> For testing purposes
+//        final Random rand = new Random();
+//        final Integer usageThreshold = 9;
+//
+//        DataSet<BipartiteEdge<String, String, Integer>> authorKeywordsEdges = publications
+//                .flatMap(new FlatMapFunction<OagPublication, Tuple3<String, String, Integer>>() {
+//                    @Override
+//                    public void flatMap(OagPublication publication,
+//                                        Collector<Tuple3<String, String, Integer>> out) throws Exception {
+//
+//                        // get keywords from publication
+//                        Set<String> keywords = publication.getKeywords();
+//
+//                        // since we will perform clustering based on keywords
+//                        // if keyword set is empty move on
+//                        if (keywords == null || keywords.isEmpty()) {
+//                            return;
+//                        }
+//
+//                        // intersect defined keyword set and keywords found in this publication
+//                        // we need to create a new HashSet since retainAll() will remove any elements
+//                        // which are not found in the second collection
+//                        Set<String> intersection = new HashSet<String>(definedKeywords);
+//                        intersection.retainAll(keywords);
+//
+//                        // check if the intersection set contains any elements
+//                        if (intersection.isEmpty()) {
+//                            return; // publication does not contain keywords which were specified
+//                        }
+//
+//                        // get the authors set
+//                        Set<String> authors = publication.getAuthors();
+//                        for (String author : authors) {
+//                            for (String keyword : intersection) {
+//
+//                                // TODO -> For now use random since not enough data
+//                                Integer n = rand.nextInt(9) + 1;
+//
+//                                // emit (Author, Keyword, 1)
+//                                out.collect(new Tuple3<String, String, Integer>(author, keyword, n));
+//                            }
+//                        }
+//                    }
+//                }).groupBy(new KeySelector<Tuple3<String, String, Integer>, Tuple2<String, String>>() {
+//                    @Override
+//                    public Tuple2 getKey(Tuple3<String, String, Integer> value) throws Exception {
+//                        return Tuple2.of(value.f0, value.f1);
+//                    }
+//                }).reduce(new ReduceFunction<Tuple3<String, String, Integer>>() {
+//                    @Override
+//                    public Tuple3<String, String, Integer> reduce(Tuple3<String, String, Integer> current,
+//                                                                  Tuple3<String, String, Integer> pre) throws Exception {
+//
+//                        return new Tuple3<String, String, Integer>(current.f0, current.f1, current.f2 + pre.f2);
+//                    }
+//                }).filter(new FilterFunction<Tuple3<String, String, Integer>>() {
+//                    @Override
+//                    public boolean filter(Tuple3<String, String, Integer> edge) throws Exception {
+//                        return (edge.f2 > usageThreshold);
+//                    }
+//                }).map(new MapFunction<Tuple3<String, String, Integer>,
+//                        BipartiteEdge<String, String, Integer>>() {
+//                    @Override
+//                    public BipartiteEdge<String, String, Integer> map(
+//                            Tuple3<String, String, Integer> value) throws Exception {
+//                        return new BipartiteEdge<String, String, Integer>(value.f0, value.f1, value.f2);
+//                    }
+//                });
+//
+//        DataSet<Vertex<String, NullValue>> topAuthorVertices = authorKeywordsEdges.
+//                map(new MapFunction<BipartiteEdge<String, String, Integer>, Vertex<String, NullValue>>() {
+//                    @Override
+//                    public Vertex<String, NullValue> map(BipartiteEdge<String, String, Integer> edge) throws Exception {
+//                        Vertex<String, NullValue> v = new Vertex<String, NullValue>();
+//                        v.setId(edge.getTopId());
+//                        return v;
+//                    }
+//                }).distinct();
+//
+//        DataSet<Vertex<String, NullValue>> bottomKeywordVertices = environment.fromCollection(definedKeywords)
+//                .map(new MapFunction<String, Vertex<String, NullValue>>() {
+//                    @Override
+//                    public Vertex<String, NullValue> map(String value) throws Exception {
+//                        Vertex<String, NullValue> v = new Vertex<String, NullValue>();
+//                        v.setId(value);
+//                        return v;
+//                    }
+//                });
+//
+//        BipartiteGraph<String, String, NullValue, NullValue, Integer> authorsKeywordGraph = BipartiteGraph
+//                .fromDataSet(topAuthorVertices, bottomKeywordVertices, authorKeywordsEdges, environment);
+//
+//        Graph<String, NullValue, Tuple2<Integer, Integer>> similarAuthorsGraph = authorsKeywordGraph
+//                .projectionTopSimple();
+//
+//        DataSet<Tuple2<String, String>> similarAuthorsEdges = similarAuthorsGraph
+//                .getEdgesAsTuple3()
+//                .map(new MapFunction<Tuple3<String, String, Tuple2<Integer, Integer>>,
+//                        Tuple2<String, String>>() {
+//                    @Override
+//                    public Tuple2<String, String> map(Tuple3<String, String, Tuple2<Integer, Integer>>
+//                                                              value) throws Exception {
+//                        return new Tuple2<String, String>(value.f0, value.f1);
+//                    }
+//                })
+//                .first(200);
+//
+//        similarAuthorsEdges.writeAsCsv("/home/delinvas/repos/SciPi/clustering_authors.csv");
 
         // create a author -> keyword bipartite graph where the edge weights
         // correspond to the number of times that keyword was used by the author
