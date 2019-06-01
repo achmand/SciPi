@@ -166,9 +166,9 @@ class ScipiVisual():
         # show table using pyplot 
         trace = go.Table(
                 header=dict(values=["year"] + list(result.columns),
-                fill = dict(color='#C2D4FF'),
-                align = ['left'] * 5),
-        cells=dict(values=[result.index.values, 
+                            fill = dict(color='#C2D4FF'),
+                            align = ['left'] * 5),
+                cells=dict(values=[result.index.values, 
                           result["Single authored"],
                           result["Joint authored"],
                           result["Total Publications"],
@@ -233,9 +233,9 @@ class ScipiVisual():
         # show table using pyplot 
         trace = go.Table(
                 header=dict(values=["year"] + list(result.columns),
-                fill = dict(color='#C2D4FF'),
-                align = ['left'] * 5),
-        cells=dict(values=[result.index.values, 
+                            fill = dict(color='#C2D4FF'),
+                            align = ['left'] * 5),
+                cells=dict(values=[result.index.values, 
                           result["Total no. of papers (P)"],
                           result["Total no. of authorship (A)"],
                           result["Avg. no of authors per paper (AAP = A/P)"]],
@@ -288,7 +288,6 @@ class ScipiVisual():
 
             G.add_edge(vertex_a, vertex_b)
 
-
         pos = nx.nx_agraph.graphviz_layout(G, prog=layout)
         for n, p in pos.items():
             G.node[n]["pos"] = p
@@ -324,7 +323,7 @@ class ScipiVisual():
             # set info in trace 
             # NODE TYPE: NAME 
             node_type = tmp_node["type"]
-            node_info = "{}: {}".format(node_type, node)
+            node_info = "{}<br>{}".format(node_type, node)
             node_trace["text"]+=tuple([node_info])
 
             # set marker for each node 
@@ -347,7 +346,7 @@ class ScipiVisual():
             edge_trace["y"] += tuple([y0, y1, None])
 
         # plot graph network 
-        title ="<br>Dense Communities in Publications Network ({})".format(layout)
+        title ="<br>Dense Communities in Publications Network (Layout: {})".format(layout)
         fig = go.Figure(data=[edge_trace, node_trace],
              layout=go.Layout(
                 title=title,
@@ -359,9 +358,139 @@ class ScipiVisual():
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
 
         # show plot 
-        iplot(fig, filename='networkx')
+        iplot(fig, filename="networkx")
 
-    
+        # print total nodes & edges
+        print("No. Nodes: {}\nNo. Edges: {}".format(G.number_of_nodes(), G.number_of_edges()))
+
+    def plot_author_clustering(self, layout):
+          
+        # get author edges result 
+        with open("clustering_authors.csv") as f:
+            data=[tuple(line) for line in csv.reader(f)]
+
+        # create a new graph 
+        G = nx.Graph()
+
+        # loop in all edges (author -> author)
+        for edge in data:
+            
+            # get author & add vertex 
+            vertex_a = edge[0]
+            G.add_node(vertex_a)    
+            
+            # get second author & add vertex 
+            vertex_b = edge[1]
+            G.add_node(vertex_b)    
+
+            # add an edge between the two authors 
+            G.add_edge(vertex_a, vertex_b)
+
+        # generate position for vertices according to the layout defined
+        pos = nx.nx_agraph.graphviz_layout(G, prog=layout)
+        for n, p in pos.items():
+            G.node[n]["pos"] = p
+
+        # create potential collaborators table 
+        collab_list = []
+        for node, adjacencies in G.adjacency():
+            authors = " | ".join(list(adjacencies.keys()))
+            collab_list.append((node, authors, len(adjacencies)))
+
+        # create dataframe 
+        columns = ["Author", "Potential Collaborators", "No. Collaborators"]
+        df = pd.DataFrame([x for x in collab_list], columns=columns)
+
+        # show table using pyplot 
+        # show table using pyplot 
+        trace = go.Table(
+                header=dict(values=list(df.columns),
+                            fill = dict(color='#C2D4FF'),
+                            align = ['left'] * 5),
+                cells=dict(values=[df["Author"],
+                                   df["Potential Collaborators"],
+                                   df["No. Collaborators"]],
+               fill = dict(color='#F5F8FF'),
+               align = ['left'] * 5))
+
+        tbl_layout = dict(width=900, height=700)
+        table_result = [trace] 
+        fig = dict(data=table_result, layout=tbl_layout)
+        iplot(fig, filename = "pandas_table")
+
+
+        # create the node trace for the plot
+        node_trace = go.Scatter(
+            x=[],
+            y=[],
+            text=[],
+            mode="markers",
+            hoverinfo="text",
+            marker=dict(
+                showscale=True,
+                color=[],
+                reversescale=True,
+                colorscale="Electric",
+                size=12,
+                colorbar=dict(
+                    thickness=15,
+                    title="Potential Collaborators",
+                    xanchor="left",
+                    titleside="right"),
+                line=dict(width=2)))
+
+        # set node properties to node trace 
+        for node in G.nodes():
+
+            # get current node 
+            tmp_node = G.node[node]
+            
+            # set positions in trace
+            x, y = tmp_node["pos"]
+            node_trace["x"] += tuple([x])
+            node_trace["y"] += tuple([y])
+
+         # create edge trace 
+        edge_trace = go.Scatter(
+            x=[],
+            y=[],
+            line=dict(width=0.5, color="#888"),
+            hoverinfo="none",
+            mode="lines")
+
+        # set edge properties to edge trace 
+        for edge in G.edges():
+            x0, y0 = G.node[edge[0]]["pos"]
+            x1, y1 = G.node[edge[1]]["pos"]
+            edge_trace["x"] += tuple([x0, x1, None])
+            edge_trace["y"] += tuple([y0, y1, None])
+
+        # set info each node 
+        # author name => no. of potential collab
+        for node, adjacencies in G.adjacency():
+            ajd_len = len(adjacencies)
+            node_trace["marker"]["color"]+=tuple([ajd_len])
+            node_info = "{}<br># of potential collaborators:{}".format(node ,str(ajd_len))
+            node_trace['text']+=tuple([node_info])
+            
+        # plot potential collaborators network 
+        title ="<br>Potential Collaborators in Publications Network (Layout: {})".format(layout)
+        fig = go.Figure(data=[edge_trace, node_trace],
+             layout=go.Layout(
+                title=title,
+                titlefont=dict(size=16),
+                showlegend=False,
+                hovermode="closest",
+                margin=dict(b=20,l=5,r=5,t=40),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
+
+        # show plot 
+        iplot(fig, filename="networkx")
+
+        # print total nodes & edges
+        print("No. Nodes: {}\nNo. Edges: {}".format(G.number_of_nodes(), G.number_of_edges()))
+        
     def close(self):
 
         # closes connections/sessions with cassandraDB cluster 

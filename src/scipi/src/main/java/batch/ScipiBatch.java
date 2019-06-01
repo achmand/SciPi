@@ -126,7 +126,7 @@ public class ScipiBatch {
 
         // TODO -> For testing purposes
         final Random rand = new Random();
-        final Integer usageThreshold = 3;
+        final Integer usageThreshold = 9;
 
         DataSet<BipartiteEdge<String, String, Integer>> authorKeywordsEdges = publications
                 .flatMap(new FlatMapFunction<OagPublication, Tuple3<String, String, Integer>>() {
@@ -160,7 +160,7 @@ public class ScipiBatch {
                             for (String keyword : intersection) {
 
                                 // TODO -> For now use random since not enough data
-                                Integer n = rand.nextInt(5) + 1;
+                                Integer n = rand.nextInt(9) + 1;
 
                                 // emit (Author, Keyword, 1)
                                 out.collect(new Tuple3<String, String, Integer>(author, keyword, n));
