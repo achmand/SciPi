@@ -25,23 +25,23 @@ CREATE TABLE IF NOT EXISTS scipi.publications(
 DROP TABLE scipi.keywords;
 CREATE TABLE IF NOT EXISTS scipi.keywords(
     keyword_name text, 
-    keyword_count int, 
+    keyword_count bigint, 
     PRIMARY KEY(keyword_name));
 
 # creates table to save field of study count 
 DROP TABLE scipi.field_study;
 CREATE TABLE IF NOT EXISTS scipi.field_study(
     field_study_name text, 
-    field_study_count int, 
+    field_study_count bigint, 
     PRIMARY KEY(field_study_name));
 
 # creates table to save single authored vs. co-authored publications year wise (authorship pattern) 
 DROP TABLE scipi.yrwisedist;
 CREATE TABLE IF NOT EXISTS scipi.yrwisedist(
     year text, 
-    single int, 
-    joint int, 
-    total int, 
+    single bigint, 
+    joint bigint, 
+    total bigint, 
     single_perc double, 
     joint_perc double, 
     PRIMARY KEY(year));
@@ -50,18 +50,25 @@ CREATE TABLE IF NOT EXISTS scipi.yrwisedist(
 DROP TABLE scipi.authorptrn;
 CREATE TABLE IF NOT EXISTS scipi.authorptrn(
     author_unit int, 
-    no_articles int, 
-    no_authors int,
+    no_articles bigint, 
+    no_authors bigint,
     PRIMARY KEY(author_unit));
 
 # creates table to save average number of authors per paper (AAP) in 
 DROP TABLE scipi.aap;
 CREATE TABLE IF NOT EXISTS scipi.aap(
     year text, 
-    no_articles int, 
-    no_authors int, 
+    no_articles bigint, 
+    no_authors bigint, 
     avg_author_paper double, 
     PRIMARY KEY(year));
+
+# creates table to save count by year for papers with more than 500 authors (physical sciences argument)
+DROP TABLE scipi.hyper_authorship;
+CREATE TABLE IF NOT EXISTS scipi.hyper_authorship(
+    hyper_authorship_year text, 
+    hyper_authorship_count bigint, 
+    PRIMARY KEY(hyper_authorship_year));
 
 # delete all records from each table 
 TRUNCATE scipi.publications;
@@ -70,6 +77,7 @@ TRUNCATE scipi.field_study;
 TRUNCATE scipi.yrwisedist;
 TRUNCATE scipi.authorptrn;
 TRUNCATE scipi.aap;
+TRUNCATE scipi.hyper_authorship;
 
 CREATE TABLE IF NOT EXISTS scipi.topkw(keyword text, count int,  PRIMARY KEY(keyword));
 

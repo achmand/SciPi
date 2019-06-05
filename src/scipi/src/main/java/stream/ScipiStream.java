@@ -143,8 +143,8 @@ public class ScipiStream {
                     }
                 }).build();
 
-        DataStream<Tuple2<String, Integer>> keywordStream = publicationStream
-                .flatMap(new OagKwMapper()) // map
+        DataStream<Tuple2<String, Long>> keywordStream = publicationStream
+                .flatMap(new KeywordMapper()) // map
                 .keyBy(0)           // key by keyword
                 .sum(1);       // sum the emitted 1
 
@@ -153,8 +153,8 @@ public class ScipiStream {
                 .setQuery("INSERT INTO scipi.keywords(keyword_name, keyword_count) values (?, ?);")
                 .build();
 
-        DataStream<Tuple2<String, Integer>> fieldOfStudyStream = publicationStream
-                .flatMap(new OagFosMapper())    // map
+        DataStream<Tuple2<String, Long>> fieldOfStudyStream = publicationStream
+                .flatMap(new FieldOfStudyMapper())    // map
                 .keyBy(0)               // key by field of study
                 .sum(1);           // sum the emitted 1
 
@@ -163,11 +163,11 @@ public class ScipiStream {
                 .setQuery("INSERT INTO scipi.field_study(field_study_name, field_study_count) values (?, ?);")
                 .build();
 
-        DataStream<Tuple6<String, Integer, Integer, Integer, Double, Double>> yrWiseDist = publicationStream
+        DataStream<Tuple6<String, Long, Long, Long, Double, Double>> yrWiseDist = publicationStream
                 .map(new YearWiseMapper())       // map
                 .keyBy(0)                // key by year published
                 .reduce(new YearWiseReducer())   // reduce by counting single & co-authored
-                .map(new YearPercMapper());
+                .map(new YearPercMapper());      // set percentages
 
         CassandraSink.addSink(yrWiseDist)
                 .setClusterBuilder(cassandraBuilder)
@@ -175,7 +175,7 @@ public class ScipiStream {
                         " values (?, ?, ?, ?, ?, ?);")
                 .build();
 
-        DataStream<Tuple3<Integer, Integer, Integer>> authorshipPattern = publicationStream
+        DataStream<Tuple3<Integer, Long, Long>> authorshipPattern = publicationStream
                 .map(new AuthorshipMapper())      // map  (no. authors, no. articles, tot no. authors)
                 .keyBy(0)                 // key by no. authors (unit)
                 .reduce(new AuthorshipReducer()); // reduce by adding up total publications and total authors
@@ -185,7 +185,7 @@ public class ScipiStream {
                 .setQuery("INSERT INTO scipi.authorptrn(author_unit, no_articles, no_authors) values (?, ?, ?);")
                 .build();
 
-        DataStream<Tuple4<String, Integer, Integer, Double>> aap = publicationStream
+        DataStream<Tuple4<String, Long, Long, Double>> aap = publicationStream
                 .map(new AapMapper())
                 .keyBy(0)
                 .reduce(new AapReducer())
@@ -194,6 +194,16 @@ public class ScipiStream {
         CassandraSink.addSink(aap)
                 .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.aap(year, no_authors, no_articles, avg_author_paper) values (?, ?, ?, ?);")
+                .build();
+
+        DataStream<Tuple2<String, Long>> hyperAuthorship = publicationStream
+                .flatMap(new HyperAuthorshipMapper()) // map (year, 1)
+                .keyBy(0)                     // key by year
+                .sum(1);                 // sum occurrences
+
+        CassandraSink.addSink(hyperAuthorship)
+                .setClusterBuilder(cassandraBuilder)
+                .setQuery("INSERT INTO scipi.hyper_authorship(hyper_authorship_year, hyper_authorship_count) values (?, ?);")
                 .build();
 
         // execute stream processing
@@ -580,11 +590,11 @@ public class ScipiStream {
         }
     }
 
-    // mapper: Publication to Tuple<String, int> to count occurrences (keywords)
-    private static final class OagKwMapper implements FlatMapFunction<Publication, Tuple2<String, Integer>> {
+    // mapper: Publication to Tuple<String, Long> to count occurrences (keywords)
+    private static final class KeywordMapper implements FlatMapFunction<Publication, Tuple2<String, Long>> {
 
         @Override
-        public void flatMap(Publication value, Collector<Tuple2<String, Integer>> out) throws Exception {
+        public void flatMap(Publication value, Collector<Tuple2<String, Long>> out) throws Exception {
 
             // get keyword set from OagPublication
             Set<String> keywords = value.getKeywords();
@@ -597,17 +607,17 @@ public class ScipiStream {
                 for (String keyword : keywords) {
 
                     // emit (keyword : 1)
-                    out.collect(new Tuple2<String, Integer>(keyword, 1));
+                    out.collect(new Tuple2<String, Long>(keyword, 1L));
                 }
             }
         }
     }
 
-    // mapper: Publication to Tuple<String, int> to count occurrences (field of study)
-    private static final class OagFosMapper implements FlatMapFunction<Publication, Tuple2<String, Integer>> {
+    // mapper: Publication to Tuple<String, Long> to count occurrences (field of study)
+    private static final class FieldOfStudyMapper implements FlatMapFunction<Publication, Tuple2<String, Long>> {
 
         @Override
-        public void flatMap(Publication value, Collector<Tuple2<String, Integer>> out) throws Exception {
+        public void flatMap(Publication value, Collector<Tuple2<String, Long>> out) throws Exception {
 
             // get fos set from OagPublication
             Set<String> fos = value.getFos();
@@ -620,17 +630,17 @@ public class ScipiStream {
                 for (String field : fos) {
 
                     // emit (fos : 1)
-                    out.collect(new Tuple2<String, Integer>(field, 1));
+                    out.collect(new Tuple2<String, Long>(field, 1L));
                 }
             }
         }
     }
 
     // mapper: Publication to Tuple<String, int> to count occurrences (single vs co-authored publications)
-    private static class YearWiseMapper implements MapFunction<Publication, Tuple3<String, Integer, Integer>> {
+    private static class YearWiseMapper implements MapFunction<Publication, Tuple3<String, Long, Long>> {
 
         @Override
-        public Tuple3<String, Integer, Integer> map(Publication publication) throws Exception {
+        public Tuple3<String, Long, Long> map(Publication publication) throws Exception {
 
             // get year from OagPublication
             String year = publication.getYear();
@@ -640,39 +650,39 @@ public class ScipiStream {
 
             // set single and joint authored
             Integer authorsCount = authors.size();
-            Integer single = authorsCount == 1 ? 1 : 0;
-            Integer joint = authorsCount > 1 ? 1 : 0;
+            Long single = authorsCount == 1 ? 1L : 0;
+            Long joint = authorsCount > 1 ? 1L : 0;
 
             // emit (year, single, joint)
-            return new Tuple3<String, Integer, Integer>(year, single, joint);
+            return new Tuple3<String, Long, Long>(year, single, joint);
         }
     }
 
     // reducer: reduce by adding up single-author and co-authored publications
-    private static class YearWiseReducer implements ReduceFunction<Tuple3<String, Integer, Integer>> {
+    private static class YearWiseReducer implements ReduceFunction<Tuple3<String, Long, Long>> {
 
         @Override
-        public Tuple3<String, Integer, Integer> reduce(Tuple3<String, Integer, Integer> current,
-                                                       Tuple3<String, Integer, Integer> pre) throws Exception {
+        public Tuple3<String, Long, Long> reduce(Tuple3<String, Long, Long> current,
+                                                       Tuple3<String, Long, Long> pre) throws Exception {
 
             // emit reduced tuple (year, single, joint)
-            return new Tuple3<String, Integer, Integer>(current.f0, current.f1 + pre.f1, current.f2 + pre.f2);
+            return new Tuple3<String, Long, Long>(current.f0, current.f1 + pre.f1, current.f2 + pre.f2);
         }
     }
 
     // mapper: maps (yr, single, co-authored) to (yr, single, co-authored, %single, %co-authored)
-    private static class YearPercMapper implements MapFunction<Tuple3<String, Integer, Integer>,
-            Tuple6<String, Integer, Integer, Integer, Double, Double>> {
+    private static class YearPercMapper implements MapFunction<Tuple3<String, Long, Long>,
+            Tuple6<String, Long, Long, Long, Double, Double>> {
 
         @Override
-        public Tuple6<String, Integer, Integer, Integer, Double, Double> map(
-                Tuple3<String, Integer, Integer> value) throws Exception {
+        public Tuple6<String, Long, Long, Long, Double, Double> map(
+                Tuple3<String, Long, Long> value) throws Exception {
 
             // sum total single and co-authored to get total publications
-            Integer totalPub = value.f1 + value.f2;
+            Long totalPub = value.f1 + value.f2;
 
             // return (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
-            return new Tuple6<String, Integer, Integer, Integer, Double, Double>(
+            return new Tuple6<String, Long, Long, Long, Double, Double>(
                     value.f0, // year
                     value.f1, // single author
                     value.f2, // co-authored
@@ -685,42 +695,42 @@ public class ScipiStream {
 
     // mapper: maps Publication to (no. authors, no. articles, tot no. authors)
     private static class AuthorshipMapper implements MapFunction<Publication,
-            Tuple3<Integer, Integer, Integer>> {
+            Tuple3<Integer, Long, Long>> {
 
         @Override
-        public Tuple3<Integer, Integer, Integer> map(Publication publication) throws Exception {
+        public Tuple3<Integer, Long, Long> map(Publication publication) throws Exception {
 
             // no of authors who worked on this publication (unit)
             Integer noAuthors = publication.getAuthors().size();
 
             // return (no. authors, no. articles, tot no.authors)
-            return new Tuple3<Integer, Integer, Integer>(noAuthors, 1, noAuthors);
+            return new Tuple3<Integer, Long, Long>(noAuthors, 1L, noAuthors.longValue());
         }
     }
 
     // reducer: reduce by adding up total publications and total authors
-    private static class AuthorshipReducer implements ReduceFunction<Tuple3<Integer, Integer, Integer>> {
+    private static class AuthorshipReducer implements ReduceFunction<Tuple3<Integer, Long, Long>> {
 
         @Override
-        public Tuple3<Integer, Integer, Integer> reduce(Tuple3<Integer, Integer, Integer> current,
-                                                        Tuple3<Integer, Integer, Integer> prev) throws Exception {
+        public Tuple3<Integer, Long, Long> reduce(Tuple3<Integer, Long, Long> current,
+                                                  Tuple3<Integer, Long, Long> prev) throws Exception {
 
             // sum up total publications
-            Integer totPublications = current.f1 + prev.f1;
+            Long totPublications = current.f1 + prev.f1;
 
             // total publications * no.authors (unit)
-            Integer totAuthors = totPublications * current.f0;
+            Long totAuthors = totPublications * current.f0;
 
             // emit reduced tuple (no. authors, no. articles, tot no.authors)
-            return new Tuple3<Integer, Integer, Integer>(current.f0, totPublications, totAuthors);
+            return new Tuple3<Integer, Long, Long>(current.f0, totPublications, totAuthors);
         }
     }
 
     // mapper: maps Publication to (year, no. authors, no. publications)
-    private static class AapMapper implements MapFunction<Publication, Tuple3<String, Integer, Integer>> {
+    private static class AapMapper implements MapFunction<Publication, Tuple3<String, Long, Long>> {
 
         @Override
-        public Tuple3<String, Integer, Integer> map(Publication publication) throws Exception {
+        public Tuple3<String, Long, Long> map(Publication publication) throws Exception {
 
             // get year from OagPublication
             String year = publication.getYear();
@@ -732,37 +742,57 @@ public class ScipiStream {
             Integer authorsCount = authors.size();
 
             // emit (year, no. authors, no. publications)
-            return new Tuple3<String, Integer, Integer>(year, authorsCount, 1);
+            return new Tuple3<String, Long, Long>(year, authorsCount.longValue(), 1L);
         }
     }
 
     // reducer: reduce by adding up no. authors & no. publications
-    private static class AapReducer implements ReduceFunction<Tuple3<String, Integer, Integer>> {
+    private static class AapReducer implements ReduceFunction<Tuple3<String, Long, Long>> {
 
         @Override
-        public Tuple3<String, Integer, Integer> reduce(Tuple3<String, Integer, Integer> current,
-                                                       Tuple3<String, Integer, Integer> prev) throws Exception {
+        public Tuple3<String, Long, Long> reduce(Tuple3<String, Long, Long> current,
+                                                       Tuple3<String, Long, Long> prev) throws Exception {
 
             // emit reduced tuple: (year, no. authors, no. publications)
-            return new Tuple3<String, Integer, Integer>(current.f0, current.f1 + prev.f1, current.f2 + prev.f2);
+            return new Tuple3<String, Long, Long>(current.f0, current.f1 + prev.f1, current.f2 + prev.f2);
         }
     }
 
     // mapper: maps (year, no. authors, no. publications) to (year, no. authors, no. publications, AAP)
-    private static class AapAvgMapper implements MapFunction<Tuple3<String, Integer, Integer>,
-            Tuple4<String, Integer, Integer, Double>> {
+    private static class AapAvgMapper implements MapFunction<Tuple3<String, Long, Long>,
+            Tuple4<String, Long, Long, Double>> {
 
         @Override
-        public Tuple4<String, Integer, Integer, Double> map(Tuple3<String, Integer, Integer> value) throws Exception {
+        public Tuple4<String, Long, Long, Double> map(Tuple3<String, Long, Long> value) throws Exception {
 
 
             // return (year, no. authors, no. publications, avg no authors per paper AAP)
-            return new Tuple4<String, Integer, Integer, Double>(
+            return new Tuple4<String, Long, Long, Double>(
                     value.f0, // year
                     value.f1, // no. authors
                     value.f2, // no. publications
                     new Double((value.f1 * 1.0) / value.f2) // aap
             );
+        }
+    }
+
+    private static class HyperAuthorshipMapper implements FlatMapFunction<Publication, Tuple2<String, Long>> {
+
+        @Override
+        public void flatMap(Publication publication,
+                            Collector<Tuple2<String, Long>> out) throws Exception {
+
+            // get authors
+            Set<String> authors = publication.getAuthors();
+            if(authors.size() < 500){
+                return;
+            }
+
+            // get title
+            String title = publication.getTitle();
+
+            // publication has more than 500 authors
+            out.collect(new Tuple2<String, Long>(title, 1L));
         }
     }
 }
