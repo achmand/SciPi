@@ -1,65 +1,16 @@
 package stream;
 
 /*
-
 Handles/processes Kafka streams which contains publications using Apache Flink.
 
--------------------
-CASSANDRA DB TABLES
--------------------
-- Keyspace: scipi
-- Tables
-    > oagpub: publications coming from OAG [doi, title, publisher, venue, lang, keywords, year, authors]
-    > oagkw:  keyword count from OAG publications [keyword, count]
-    > oagfos: field of study count from OAG publications [fos, count]
-    > yrwisedist: single vs co-authored year wise distributions
-                  [year, total single, total co-authored, total publications,
-                  percentage single author, percentage co-authored]
+Notes
+------
+> Kafka consumer will periodically commit the offsets to Zookeeper, since check pointing is not enabled
 
--------------
-PROCESS FLOW
--------------
-- 0.0: consume data stream from kafka
-
-- 1.0: map json strings passed from kafka to flink stream (POJO per publication)
-      > 1.0.1: only publications written in english
-      > 1.0.2: doi must not be empty as it is used as an id in CassandraDB
-      > 1.0.3: title must not be empty
-      > 1.0.4: at least a publisher or venue
-      > 1.0.5: at least one keyword or field of study
-          > 1.0.5.1: clean keywords and keep only valid ones
-            > 1.0.5.2: clean fos and keep only valid ones
-      > 1.0.6: must have a valid year
-      > 1.0.7: must have at least one author
-            > 1.0.7.1: clean authors and keep only valid ones
-
-- 1.1: persist publications to CassandraDB using data sink
-
-- 2.0: [keyword count]: (keyword, count)
-                      - map OagPublication to (keyword, 1)
-                      - key by keyword
-                      - sum keyword on count
-
-- 2.1: persist [keyword count] to CassandraDB using data sink
-
-- 3.0: [field of study count]: (fos, count)
-                              - map OagPublication to (fos, 1)
-                              - key by fos
-                              - sum fos on count
-
-- 3.1: persist [field of study count count] to CassandraDB using data sink
-
-- 4.0: [year wise distribution]: (yr, tot single, tot joint, tot, %single, %joint)
-                              - map OagPublication to (yr, single, joint) -> using YearWiseMapper:map
-                              - key by year
-                              - reduce (yr, single, joint) to (yr, tot single, tot joint)
-                                  -> using YearWiseReducer:reduce
-                              - map (yr, tot single, tot joint) to (yr, tot single, tot joint, tot, %single, %joint)
-                                  -> using YearPercMapper:map
-
-- 4.1: persist [year wise distribution] to CassandraDB using data sink
-
-- 5.0: [authorship patterns]: (no. authors, no. publications, tot authors, %publications)
+Parameters
+----------
+> cassandra_point: the cassandra point (IP) that the driver uses to discover the cluster topology (local execution use 127.0.0.1)
+> kafka_brokers: comma separated list for Kafka brokers (for local execution use localhost:9092)
 
 */
 
@@ -91,10 +42,13 @@ import java.util.HashSet;
 import java.util.Properties;
 import java.util.Set;
 
-
 // TODO -> Publisher check length
 
 public class ScipiStream {
+
+    // kafka topics
+    private final static String oagTopic = "oag"; // topic name for OAG data
+    private final static String dblpTopic = "dblp"; // topic name for dblp data
 
     // used to parse JSON to POJO
     private final static Gson gson = new GsonBuilder()
@@ -115,24 +69,47 @@ public class ScipiStream {
         // register parameters globally so it can be available for each node in the cluster
         environment.getConfig().setGlobalJobParameters(parameters);
 
-        // set properties for kafka
-        Properties properties = new Properties();
-        properties.setProperty("bootstrap.servers", "localhost:9092"); // IP address where Kafka is running
+        // get parameters from input
 
-        // set properties for cassandra
+        // gets cassandra points from input
+        // the cassandra point (IP) that the driver uses to discover the cluster topology
+        // the driver will retrieve the address of the other nodes automatically
+        final String cassandraPoint = parameters.get("cassandra_point"); // for local execution use 127.0.0.1
+
+        // gets kafka brokers IPs
+        // comma separated list for Kafka brokers
+        final String kafkaBrokers = parameters.get("kafka_brokers");
+
+        // set properties for kafka cluster
+        Properties properties = new Properties();
+        properties.setProperty("bootstrap.servers", kafkaBrokers); // for local execution use localhost:9092
+
+        // NOTE: the Kafka consumer will periodically commit the offsets to Zookeeper,
+        // since check pointing is not enabled
+
+        // set up FlinkKafkaConsumer/s
+        // kafka consumer for kafka stream (oag topic)
+        FlinkKafkaConsumer<String> kafkaOag = new FlinkKafkaConsumer<String>(
+                oagTopic,
+                new SimpleStringSchema(),
+                properties);
+
+        // start reading from partitions from the earliest record
+        kafkaOag.setStartFromEarliest();
+
+        // set up properties for cassandra cluster
         ClusterBuilder cassandraBuilder = new ClusterBuilder() {
             @Override
             public Cluster buildCluster(Cluster.Builder builder) {
-                return builder.addContactPoint("127.0.0.1")
+                return builder.addContactPoint(cassandraPoint)
                         .build();
             }
         };
 
-        // 0.0: consume data stream from kafka
-        DataStream<String> kafkaData = environment.addSource(
-                new FlinkKafkaConsumer<String>("oag", new SimpleStringSchema(), properties));
+        // consume data stream from kafka (oag topic)
+        DataStream<String> kafkaData = environment.addSource(kafkaOag);
 
-        // 1.0: first we map strings from Kafka to OagPublication using OagPubMapper
+        // first we map strings from Kafka to OagPublication using OagPubMapper
         DataStream<OagPublication> oagPublications = kafkaData.flatMap(new OagPubMapper());
 
         // 1.1: persist publications to CassandraDB using data sink
