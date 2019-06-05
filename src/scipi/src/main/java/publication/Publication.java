@@ -5,44 +5,52 @@ package publication;
     For more details visit: https://aminer.org/open-academic-graph
 */
 
+import com.datastax.driver.core.utils.UUIDs;
 import com.datastax.driver.mapping.annotations.Column;
 import com.datastax.driver.mapping.annotations.Table;
 import java.util.Set;
+import java.util.UUID;
 
-@Table(keyspace = "scipi", name = "oagpub")
-public class OagPublication {
+@Table(keyspace = "scipi", name = "publications")
+public class Publication {
 
-    @Column(name = "doi")
+    @Column(name = "publication_doi")
     private String doi = "";
 
-    @Column(name = "title")
+    @Column(name = "publication_title")
     private String title;
 
-    @Column(name = "publisher")
+    @Column(name = "publication_id")
+    private UUID id = UUIDs.timeBased();
+
+    @Column(name = "publication_publisher")
     private String publisher;
 
-    @Column(name = "venue")
+    @Column(name = "publication_venue")
     private String venue;
 
-    @Column(name = "lang")
+    @Column(name = "publication_lang")
     private String lang;
 
-    @Column(name = "keywords")
+    @Column(name = "publication_keywords")
     private Set<String> keywords;
 
-    @Column(name = "year")
+    @Column(name = "publication_year")
     private String year;
 
-    @Column(name = "authors")
+    @Column(name = "publication_authors")
     private Set<String> authors;
 
-    @Column(name="fos")
+    @Column(name="publication_fos")
     private Set<String> fos;
 
-    public OagPublication() {
+    @Column(name="publication_dataset")
+    private String datasetType;
+
+    public Publication() {
     }
 
-    public OagPublication(String doi,
+    public Publication(String doi,
                           String title,
                           String publisher,
                           String venue,
@@ -50,7 +58,8 @@ public class OagPublication {
                           Set<String> keywords,
                           String year,
                           Set<String> authors,
-                          Set<String> fos
+                          Set<String> fos,
+                          String datasetType
     ) {
         this.setDoi(doi);
         this.setTitle(title);
@@ -61,6 +70,7 @@ public class OagPublication {
         this.setYear(year);
         this.setAuthors(authors);
         this.setFos(fos);
+        this.setDatasetType(datasetType);
     }
 
     public String getDoi() {
@@ -77,6 +87,14 @@ public class OagPublication {
 
     public void setTitle(String title) {
         this.title = title;
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public void setId(UUID id) {
+        this.id = id;
     }
 
     public String getPublisher() {
@@ -133,5 +151,13 @@ public class OagPublication {
 
     public void setFos(Set<String> fos) {
         this.fos = fos;
+    }
+
+    public String getDatasetType() {
+        return datasetType;
+    }
+
+    public void setDatasetType(String datasetType) {
+        this.datasetType = datasetType;
     }
 }

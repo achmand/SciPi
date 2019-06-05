@@ -2,14 +2,14 @@ package dblp;
 
 import java.util.ArrayList;
 
-public class Paper {
+public class DblpPublication {
 
-	public String key;
-	public String title;
-	public int year;
-	public String conference;
-	public ArrayList<String> authors;
-	public ArrayList<String> citations;
+	private String key;
+	private String title;
+	private int year;
+	private String conference;
+	private ArrayList<String> authors;
+	private ArrayList<String> citations;
 
 	public static final int OTHER = 0;
 	public static final int INPROCEEDING = 1;
@@ -19,10 +19,68 @@ public class Paper {
 	public static final int CITE = 5;
 	public static final int CONFERENCE = 6;
 
+	public DblpPublication() {
+		key = "";
+		title = "";
+		conference = "";
+		year = 0;
+		authors = new ArrayList<String>();
+		citations = new ArrayList<String>();
+	}
+
 	public String toString(){
 		return "title: " + title + " authors: " + authors.toString() +
 				" conference: " + conference + " year: " + year + " key: " + key;
 	}
+
+	public String getKey() {
+		return key;
+	}
+
+	public void setKey(String key) {
+		this.key = key;
+	}
+
+	public String getTitle() {
+		return title;
+	}
+
+	public void setTitle(String title) {
+		this.title = title;
+	}
+
+	public int getYear() {
+		return year;
+	}
+
+	public void setYear(int year) {
+		this.year = year;
+	}
+
+	public String getConference() {
+		return conference;
+	}
+
+	public void setConference(String conference) {
+		this.conference = conference;
+	}
+
+	public ArrayList<String> getAuthors() {
+		return authors;
+	}
+
+	public void setAuthors(ArrayList<String> authors) {
+		this.authors = authors;
+	}
+
+	public ArrayList<String> getCitations() {
+		return citations;
+	}
+
+	public void setCitations(ArrayList<String> citations) {
+		this.citations = citations;
+	}
+
 	public static int getElement(String name) {
 		if (name.equals("inproceedings")) {
 			return INPROCEEDING;
@@ -58,13 +116,5 @@ public class Paper {
 			return "other";
 		}
 	}
-
-	public Paper() {
-		key = "";
-		title = "";
-		conference = "";
-		year = 0;
-		authors = new ArrayList<String>();
-		citations = new ArrayList<String>();
-	}
 }
+

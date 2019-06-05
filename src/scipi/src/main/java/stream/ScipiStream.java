@@ -9,8 +9,8 @@ Notes
 
 Parameters
 ----------
-> cassandra_point: the cassandra point (IP) that the driver uses to discover the cluster topology (local execution use 127.0.0.1)
 > kafka_brokers: comma separated list for Kafka brokers (for local execution use localhost:9092)
+> cassandra_point: the cassandra point (IP) that the driver uses to discover the cluster topology (local execution use 127.0.0.1)
 
 */
 
@@ -35,14 +35,12 @@ import org.apache.flink.streaming.connectors.cassandra.ClusterBuilder;
 import org.apache.flink.streaming.connectors.cassandra.MapperOptions;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
 import org.apache.flink.util.Collector;
-import publication.OagPublication;
+import publication.Publication;
 
 import java.lang.reflect.Type;
 import java.util.HashSet;
 import java.util.Properties;
 import java.util.Set;
-
-// TODO -> Publisher check length
 
 public class ScipiStream {
 
@@ -50,9 +48,14 @@ public class ScipiStream {
     private final static String oagTopic = "oag"; // topic name for OAG data
     private final static String dblpTopic = "dblp"; // topic name for dblp data
 
-    // used to parse JSON to POJO
-    private final static Gson gson = new GsonBuilder()
-            .registerTypeAdapter(OagPublication.class, new PubDeserializer())
+    // used to parse JSON to POJO [topic:oag]
+    private final static Gson oagGsonBuilder = new GsonBuilder()
+            .registerTypeAdapter(Publication.class, new OagPubDeserializer())
+            .create();
+
+    // used to parse JSON to POJO [topic:dblp]
+    private final static Gson dblpGsonBuilder = new GsonBuilder()
+            .registerTypeAdapter(Publication.class, new DblpPubDeserializer())
             .create();
 
     public static void main(String[] args) throws Exception {
@@ -69,26 +72,20 @@ public class ScipiStream {
         // register parameters globally so it can be available for each node in the cluster
         environment.getConfig().setGlobalJobParameters(parameters);
 
-        // get parameters from input
-
-        // gets cassandra points from input
-        // the cassandra point (IP) that the driver uses to discover the cluster topology
-        // the driver will retrieve the address of the other nodes automatically
-        final String cassandraPoint = parameters.get("cassandra_point"); // for local execution use 127.0.0.1
-
         // gets kafka brokers IPs
         // comma separated list for Kafka brokers
-        final String kafkaBrokers = parameters.get("kafka_brokers");
+        final String kafkaBrokers = parameters.get("kafka_brokers"); // for local execution use localhost:9092
 
         // set properties for kafka cluster
         Properties properties = new Properties();
-        properties.setProperty("bootstrap.servers", kafkaBrokers); // for local execution use localhost:9092
+        properties.setProperty("bootstrap.servers", kafkaBrokers);
 
         // NOTE: the Kafka consumer will periodically commit the offsets to Zookeeper,
         // since check pointing is not enabled
 
         // set up FlinkKafkaConsumer/s
-        // kafka consumer for kafka stream (oag topic)
+
+        // kafka consumer for kafka stream (topic: oag)
         FlinkKafkaConsumer<String> kafkaOag = new FlinkKafkaConsumer<String>(
                 oagTopic,
                 new SimpleStringSchema(),
@@ -96,6 +93,20 @@ public class ScipiStream {
 
         // start reading from partitions from the earliest record
         kafkaOag.setStartFromEarliest();
+
+        // kafka consumer for kafka stream (topic: dblp)
+        FlinkKafkaConsumer<String> kafkaDblp = new FlinkKafkaConsumer<String>(
+                dblpTopic,
+                new SimpleStringSchema(),
+                properties);
+
+        // start reading from partitions from the earliest record
+        kafkaDblp.setStartFromEarliest();
+
+        // gets cassandra points from input
+        // the cassandra point (IP) that the driver uses to discover the cluster topology
+        // the driver will retrieve the address of the other nodes automatically
+        final String cassandraPoint = parameters.get("cassandra_point"); // for local execution use 127.0.0.1
 
         // set up properties for cassandra cluster
         ClusterBuilder cassandraBuilder = new ClusterBuilder() {
@@ -107,13 +118,23 @@ public class ScipiStream {
         };
 
         // consume data stream from kafka (oag topic)
-        DataStream<String> kafkaData = environment.addSource(kafkaOag);
+        DataStream<String> kafkaOagStream = environment.addSource(kafkaOag);
 
-        // first we map strings from Kafka to OagPublication using OagPubMapper
-        DataStream<OagPublication> oagPublications = kafkaData.flatMap(new OagPubMapper());
+        // consume data stream from kafka (dblp topic)
+        DataStream<String> kafkaDblpStream = environment.addSource(kafkaDblp);
 
-        // 1.1: persist publications to CassandraDB using data sink
-        CassandraSink.addSink(oagPublications)
+        // first we map json strings from Kafka oag topic to Publication using OagPubMapper
+        DataStream<Publication> oagPublicationsStream = kafkaOagStream.flatMap(new PubMapper(oagTopic));
+
+        // then we map json strings from Kafka dblp topic to Publication using DblpPubMapper
+        DataStream<Publication> dblpPublicationStream = kafkaDblpStream.flatMap(new PubMapper(dblpTopic));
+
+        // combine both streams coming from different sources
+        DataStream<Publication> publicationStream = oagPublicationsStream.union(dblpPublicationStream);
+
+        // persist OagPublications to CassandraDB using data sink
+        // add sink for 'publications', see OagPublication class for C* columns/table definitions
+        CassandraSink.addSink(publicationStream)
                 .setClusterBuilder(cassandraBuilder)
                 .setMapperOptions(new MapperOptions() {
                     @Override
@@ -122,64 +143,54 @@ public class ScipiStream {
                     }
                 }).build();
 
-        // 2.0: map OagPublication to (keyword, count)
-        DataStream<Tuple2<String, Integer>> oagKeywords = oagPublications
+        DataStream<Tuple2<String, Integer>> keywordStream = publicationStream
                 .flatMap(new OagKwMapper()) // map
                 .keyBy(0)           // key by keyword
                 .sum(1);       // sum the emitted 1
 
-        // 2.1: persist occurrences count for keyword to CassandraDB using data sink
-        CassandraSink.addSink(oagKeywords)
+        CassandraSink.addSink(keywordStream)
                 .setClusterBuilder(cassandraBuilder)
-                .setQuery("INSERT INTO scipi.oagkw(keyword, count) values (?, ?);")
+                .setQuery("INSERT INTO scipi.keywords(keyword_name, keyword_count) values (?, ?);")
                 .build();
 
-        // 3.0: map OagPublication to (fos, count)
-        DataStream<Tuple2<String, Integer>> oagFos = oagPublications
+        DataStream<Tuple2<String, Integer>> fieldOfStudyStream = publicationStream
                 .flatMap(new OagFosMapper())    // map
                 .keyBy(0)               // key by field of study
                 .sum(1);           // sum the emitted 1
 
-        // 3.1: persist occurrences count for fos to CassandraDB using data sink
-        CassandraSink.addSink(oagFos)
+        CassandraSink.addSink(fieldOfStudyStream)
                 .setClusterBuilder(cassandraBuilder)
-                .setQuery("INSERT INTO scipi.oagfos(fos, count) values (?, ?);")
+                .setQuery("INSERT INTO scipi.field_study(field_study_name, field_study_count) values (?, ?);")
                 .build();
 
-        // 4.0: map OagPublication to (yr, tot single, tot co-authored, tot pub, %single, %co-authored)
-        DataStream<Tuple6<String, Integer, Integer, Integer, Double, Double>> yrWiseDist = oagPublications
+        DataStream<Tuple6<String, Integer, Integer, Integer, Double, Double>> yrWiseDist = publicationStream
                 .map(new YearWiseMapper())       // map
                 .keyBy(0)                // key by year published
                 .reduce(new YearWiseReducer())   // reduce by counting single & co-authored
                 .map(new YearPercMapper());
 
-        // 4.1: persist year-wise distribution to CassandraDB using data sink
         CassandraSink.addSink(yrWiseDist)
                 .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.yrwisedist(year, single, joint, total, single_perc, joint_perc)" +
                         " values (?, ?, ?, ?, ?, ?);")
                 .build();
 
-        // 5.0: map OagPublication to (no. authors, no. publications, tot authors)
-        DataStream<Tuple3<Integer, Integer, Integer>> authorshipPattern = oagPublications
+        DataStream<Tuple3<Integer, Integer, Integer>> authorshipPattern = publicationStream
                 .map(new AuthorshipMapper())      // map  (no. authors, no. articles, tot no. authors)
                 .keyBy(0)                 // key by no. authors (unit)
                 .reduce(new AuthorshipReducer()); // reduce by adding up total publications and total authors
 
-        // 5.1: persist authorship patterns to CassandraDB using data sink
         CassandraSink.addSink(authorshipPattern)
                 .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.authorptrn(author_unit, no_articles, no_authors) values (?, ?, ?);")
                 .build();
 
-        // 6.0: map OagPublication to (year, no. authors, no. publications, avg no authors per paper AAP)
-        DataStream<Tuple4<String, Integer, Integer, Double>> aap = oagPublications
+        DataStream<Tuple4<String, Integer, Integer, Double>> aap = publicationStream
                 .map(new AapMapper())
                 .keyBy(0)
                 .reduce(new AapReducer())
                 .map(new AapAvgMapper());
 
-        // 6.1: persist AAP to CassandraDB using data sink
         CassandraSink.addSink(aap)
                 .setClusterBuilder(cassandraBuilder)
                 .setQuery("INSERT INTO scipi.aap(year, no_authors, no_articles, avg_author_paper) values (?, ?, ?, ?);")
@@ -235,13 +246,13 @@ public class ScipiStream {
         return vTopics;
     }
 
-    // OagPublication JSON deserializer
-    private static class PubDeserializer implements JsonDeserializer<OagPublication> {
+    // Publication JSON deserializer [topic:oag]
+    private static class OagPubDeserializer implements JsonDeserializer<Publication> {
 
         @Override
-        public OagPublication deserialize(JsonElement jsonElement,
-                                          Type type,
-                                          JsonDeserializationContext jsonDeserializationContext)
+        public Publication deserialize(JsonElement jsonElement,
+                                       Type type,
+                                       JsonDeserializationContext jsonDeserializationContext)
                 throws JsonParseException {
 
             // get json object
@@ -327,7 +338,7 @@ public class ScipiStream {
             }
 
             // return publication
-            return new OagPublication(
+            return new Publication(
                     doi,
                     title,
                     publisher,
@@ -336,20 +347,105 @@ public class ScipiStream {
                     keywords,
                     year,
                     authors,
-                    fos);
+                    fos,
+                    oagTopic);
         }
     }
 
-    // mapper: string to POJO (OagPublication)
-    private static final class OagPubMapper implements FlatMapFunction<String, OagPublication> {
+    // Publication JSON deserializer [topic:dblp]
+    private static class DblpPubDeserializer implements JsonDeserializer<Publication> {
 
         @Override
-        public void flatMap(String value, Collector<OagPublication> out) throws Exception {
+        public Publication deserialize(JsonElement jsonElement,
+                                       Type type,
+                                       JsonDeserializationContext jsonDeserializationContext) throws JsonParseException {
 
-            // parse string/json to OagPublication
-            OagPublication publication = gson.fromJson(value, OagPublication.class);
+            // get json object
+            JsonObject jsonObject = jsonElement.getAsJsonObject();
 
-            // 1.0.1: validate language
+            // for publications coming from DBLP we will add computer science as keyword
+            HashSet<String> keywords = new HashSet<String>(1);
+            keywords.add("computer science");
+
+            // for publications coming from DBLP we will add computer science as field of study
+            HashSet<String> fos = new HashSet<String>(1);
+            fos.add("computer science");
+
+            // get authors
+            HashSet<String> authors = null;
+
+            // check that json array is not empty
+            if (jsonObject.get("authors") != null) {
+                JsonArray jsonAuthors = jsonObject.get("authors").getAsJsonArray();
+                if (jsonAuthors.size() > 0) {
+                    authors = new HashSet<String>(jsonAuthors.size());
+                    for (JsonElement author : jsonAuthors) {
+                        String authorName = author.getAsString();
+                        if (!authors.contains(authorName)) {
+                            authors.add(authorName);
+                        }
+                    }
+                }
+            }
+
+            String key = null;
+            if (jsonObject.get("key") != null) {
+                key = jsonObject.get("key").getAsString();
+            }
+
+            String title = null;
+            if (jsonObject.get("title") != null) {
+                title = jsonObject.get("title").getAsString();
+            }
+
+            String venue = null;
+            if (jsonObject.get("conference") != null) {
+                venue = jsonObject.get("conference").getAsString();
+            }
+
+            String year = null;
+            if (jsonObject.get("year") != null) {
+                year = jsonObject.get("year").getAsString();
+            }
+
+            // return publication
+            return new Publication(
+                    key,
+                    title,
+                    null,
+                    venue,
+                    "en",
+                    keywords,
+                    year,
+                    authors,
+                    fos,
+                    dblpTopic);
+        }
+    }
+
+    // mapper: string to POJO (Publication)
+    private static final class PubMapper implements FlatMapFunction<String, Publication> {
+
+        // where is the dataset coming from
+        private String datasetType;
+
+        public PubMapper(String datasetType) {
+            this.datasetType = datasetType;
+        }
+
+        @Override
+        public void flatMap(String value, Collector<Publication> out) throws Exception {
+
+            // parse string/json to Publication
+            Publication publication = null;
+
+            if (datasetType == oagTopic) { // coming from oag
+                publication = oagGsonBuilder.fromJson(value, Publication.class);
+            } else { // coming from dblp
+                publication = dblpGsonBuilder.fromJson(value, Publication.class);
+            }
+
+            // validate language
             String lang = validateStr(publication.getLang());
 
             // do not accept empty language
@@ -484,11 +580,11 @@ public class ScipiStream {
         }
     }
 
-    // mapper: OagPublication to Tuple<String, int> to count occurrences (keywords)
-    private static final class OagKwMapper implements FlatMapFunction<OagPublication, Tuple2<String, Integer>> {
+    // mapper: Publication to Tuple<String, int> to count occurrences (keywords)
+    private static final class OagKwMapper implements FlatMapFunction<Publication, Tuple2<String, Integer>> {
 
         @Override
-        public void flatMap(OagPublication value, Collector<Tuple2<String, Integer>> out) throws Exception {
+        public void flatMap(Publication value, Collector<Tuple2<String, Integer>> out) throws Exception {
 
             // get keyword set from OagPublication
             Set<String> keywords = value.getKeywords();
@@ -507,11 +603,11 @@ public class ScipiStream {
         }
     }
 
-    // mapper: OagPublication to Tuple<String, int> to count occurrences (field of study)
-    private static final class OagFosMapper implements FlatMapFunction<OagPublication, Tuple2<String, Integer>> {
+    // mapper: Publication to Tuple<String, int> to count occurrences (field of study)
+    private static final class OagFosMapper implements FlatMapFunction<Publication, Tuple2<String, Integer>> {
 
         @Override
-        public void flatMap(OagPublication value, Collector<Tuple2<String, Integer>> out) throws Exception {
+        public void flatMap(Publication value, Collector<Tuple2<String, Integer>> out) throws Exception {
 
             // get fos set from OagPublication
             Set<String> fos = value.getFos();
@@ -530,11 +626,11 @@ public class ScipiStream {
         }
     }
 
-    // mapper: OagPublication to Tuple<String, int> to count occurrences (single vs co-authored publications)
-    private static class YearWiseMapper implements MapFunction<OagPublication, Tuple3<String, Integer, Integer>> {
+    // mapper: Publication to Tuple<String, int> to count occurrences (single vs co-authored publications)
+    private static class YearWiseMapper implements MapFunction<Publication, Tuple3<String, Integer, Integer>> {
 
         @Override
-        public Tuple3<String, Integer, Integer> map(OagPublication publication) throws Exception {
+        public Tuple3<String, Integer, Integer> map(Publication publication) throws Exception {
 
             // get year from OagPublication
             String year = publication.getYear();
@@ -587,12 +683,12 @@ public class ScipiStream {
         }
     }
 
-    // mapper: maps OagPublication to (no. authors, no. articles, tot no. authors)
-    private static class AuthorshipMapper implements MapFunction<OagPublication,
+    // mapper: maps Publication to (no. authors, no. articles, tot no. authors)
+    private static class AuthorshipMapper implements MapFunction<Publication,
             Tuple3<Integer, Integer, Integer>> {
 
         @Override
-        public Tuple3<Integer, Integer, Integer> map(OagPublication publication) throws Exception {
+        public Tuple3<Integer, Integer, Integer> map(Publication publication) throws Exception {
 
             // no of authors who worked on this publication (unit)
             Integer noAuthors = publication.getAuthors().size();
@@ -620,11 +716,11 @@ public class ScipiStream {
         }
     }
 
-    // mapper: maps OagPublication to (year, no. authors, no. publications)
-    private static class AapMapper implements MapFunction<OagPublication, Tuple3<String, Integer, Integer>> {
+    // mapper: maps Publication to (year, no. authors, no. publications)
+    private static class AapMapper implements MapFunction<Publication, Tuple3<String, Integer, Integer>> {
 
         @Override
-        public Tuple3<String, Integer, Integer> map(OagPublication publication) throws Exception {
+        public Tuple3<String, Integer, Integer> map(Publication publication) throws Exception {
 
             // get year from OagPublication
             String year = publication.getYear();

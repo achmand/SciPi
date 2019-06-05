@@ -39,7 +39,7 @@ import org.apache.flink.streaming.api.functions.windowing.delta.CosineDistance;
 import org.apache.flink.streaming.connectors.cassandra.ClusterBuilder;
 import org.apache.flink.types.NullValue;
 import org.apache.flink.util.Collector;
-import publication.OagPublication;
+import publication.Publication;
 import scala.Int;
 
 import java.util.*;
@@ -103,18 +103,18 @@ public class ScipiBatch {
         // X.0.1: create edges from publications dataset
 
         // create POJO input format to get OagPublication entities from CassandraDB
-        CassandraPojoInputFormat cassandraPojoInputFormat = new CassandraPojoInputFormat<OagPublication>(
+        CassandraPojoInputFormat cassandraPojoInputFormat = new CassandraPojoInputFormat<Publication>(
                 "SELECT * FROM scipi.oagpub;",
                 cassandraBuilder,
-                OagPublication.class
+                Publication.class
         );
 
-        // TypeInformation must be specified for OagPublication POJO
-        TypeInformation<OagPublication> typeInformation = TypeInformation.of(new TypeHint<OagPublication>() {
+        // TypeInformation must be specified for Publication POJO
+        TypeInformation<Publication> typeInformation = TypeInformation.of(new TypeHint<Publication>() {
         });
 
-        // retrieve OagPublication entities as a dataset
-        DataSet<OagPublication> publications = environment.createInput(cassandraPojoInputFormat, typeInformation);
+        // retrieve Publication entities as a dataset
+        DataSet<Publication> publications = environment.createInput(cassandraPojoInputFormat, typeInformation);
 
         ///////////////////////////////////////////////////////////////////////////////////////
         // X.0: association and correlation analysis
@@ -131,10 +131,10 @@ public class ScipiBatch {
         final Cosine cosineSimilarity = new Cosine(3);
         final Double similarityThreshold = 0.5;
         DataSet<Tuple3<String, String, Double>> authorKeywordAssociation = publications
-                .flatMap(new FlatMapFunction<OagPublication, Tuple3<String, String, Double>>() {
+                .flatMap(new FlatMapFunction<Publication, Tuple3<String, String, Double>>() {
 
                     @Override
-                    public void flatMap(OagPublication publication,
+                    public void flatMap(Publication publication,
                                         Collector<Tuple3<String, String, Double>> out) throws Exception {
 
                         // get title from publication
@@ -524,10 +524,10 @@ public class ScipiBatch {
      USER DEFINED FUNCTIONS
      **************************************************/
 
-    private static final class NetworkVertexMapper implements FlatMapFunction<OagPublication, Vertex<String, PubVertexValue>> {
+    private static final class NetworkVertexMapper implements FlatMapFunction<Publication, Vertex<String, PubVertexValue>> {
 
         @Override
-        public void flatMap(OagPublication publication,
+        public void flatMap(Publication publication,
                             Collector<Vertex<String, PubVertexValue>> out) throws Exception {
 
             // TODO -> temporary
@@ -573,10 +573,10 @@ public class ScipiBatch {
         }
     }
 
-    private static final class NetworkEdgeMapper implements FlatMapFunction<OagPublication, Edge<String, Double>> {
+    private static final class NetworkEdgeMapper implements FlatMapFunction<Publication, Edge<String, Double>> {
 
         @Override
-        public void flatMap(OagPublication publication,
+        public void flatMap(Publication publication,
                             Collector<Edge<String, Double>> out) throws Exception {
 
             // gets information about the current publication

@@ -1,26 +1,85 @@
 CassandraDB tables 
 -------------------
-CREATE KEYSPACE IF NOT EXISTS scipi WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'};
-CREATE TABLE IF NOT EXISTS scipi.oagpub(doi text, title text, publisher text, venue text, lang text, keywords set<text>, year text, authors set<text>, fos set<text> ,PRIMARY KEY(doi));
-CREATE TABLE IF NOT EXISTS scipi.oagkw(keyword text, count int, PRIMARY KEY(keyword));
-CREATE TABLE IF NOT EXISTS scipi.oagfos(fos text, count int, PRIMARY KEY(fos));
-CREATE TABLE IF NOT EXISTS scipi.yrwisedist(year text, single int, joint int, total int, single_perc double, joint_perc double, PRIMARY KEY(year));
-CREATE TABLE IF NOT EXISTS scipi.authorptrn(author_unit int, no_articles int, no_authors int ,PRIMARY KEY(author_unit));
-CREATE TABLE IF NOT EXISTS scipi.aap(year text, no_articles int, no_authors int, avg_author_paper double, PRIMARY KEY(year));
-CREATE TABLE IF NOT EXISTS scipi.topkw(keyword text, count int,  PRIMARY KEY(keyword));
 
+# Local replication_factor = 1
+CREATE KEYSPACE IF NOT EXISTS scipi WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '3'};
 
-TRUNCATE scipi.oagpub;
-TRUNCATE scipi.oagkw;
-TRUNCATE scipi.oagfos;
+# creates table to save publications 
+DROP TABLE scipi.publications;
+CREATE TABLE IF NOT EXISTS scipi.publications(
+    publication_doi text, 
+    publication_title text, 
+    publication_id timeuuid, 
+    publication_publisher text, 
+    publication_venue text, 
+    publication_lang text, 
+    publication_keywords set<text>, 
+    publication_year text, 
+    publication_authors set<text>, 
+    publication_fos set<text>, 
+    publication_dataset text, 
+    PRIMARY KEY ((publication_doi, publication_title), publication_id)
+) WITH CLUSTERING ORDER BY (publication_id DESC);
+
+# creates table to save keyword count 
+DROP TABLE scipi.keywords;
+CREATE TABLE IF NOT EXISTS scipi.keywords(
+    keyword_name text, 
+    keyword_count int, 
+    PRIMARY KEY(keyword_name));
+
+# creates table to save field of study count 
+DROP TABLE scipi.field_study;
+CREATE TABLE IF NOT EXISTS scipi.field_study(
+    field_study_name text, 
+    field_study_count int, 
+    PRIMARY KEY(field_study_name));
+
+# creates table to save single authored vs. co-authored publications year wise (authorship pattern) 
+DROP TABLE scipi.yrwisedist;
+CREATE TABLE IF NOT EXISTS scipi.yrwisedist(
+    year text, 
+    single int, 
+    joint int, 
+    total int, 
+    single_perc double, 
+    joint_perc double, 
+    PRIMARY KEY(year));
+
+# creates table to save authorship pattern
+DROP TABLE scipi.authorptrn;
+CREATE TABLE IF NOT EXISTS scipi.authorptrn(
+    author_unit int, 
+    no_articles int, 
+    no_authors int,
+    PRIMARY KEY(author_unit));
+
+# creates table to save average number of authors per paper (AAP) in 
+DROP TABLE scipi.aap;
+CREATE TABLE IF NOT EXISTS scipi.aap(
+    year text, 
+    no_articles int, 
+    no_authors int, 
+    avg_author_paper double, 
+    PRIMARY KEY(year));
+
+# delete all records from each table 
+TRUNCATE scipi.publications;
+TRUNCATE scipi.keywords;
+TRUNCATE scipi.field_study;
 TRUNCATE scipi.yrwisedist;
 TRUNCATE scipi.authorptrn;
 TRUNCATE scipi.aap;
 
+CREATE TABLE IF NOT EXISTS scipi.topkw(keyword text, count int,  PRIMARY KEY(keyword));
+
+
 Kafka topics 
 -------------
-bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic oag
-bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic dblp
+repos/kafka_2.12-2.2.0/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic oag
+repos/kafka_2.12-2.2.0/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic oag
+repos/kafka_2.12-2.2.0/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic dblp
+repos/kafka_2.12-2.2.0/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic dblp
 
 
 

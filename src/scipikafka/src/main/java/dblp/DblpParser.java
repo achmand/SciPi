@@ -4,6 +4,8 @@ import java.io.*;
 import java.util.Properties;
 import javax.xml.parsers.*;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -12,15 +14,17 @@ import org.xml.sax.helpers.*;
 
 public class DblpParser {
 
+    private static ObjectMapper mapper = new ObjectMapper();
     int line = 0;
     int errors = 0;
     StringBuffer author;
+
     // set properties for kafka
     Properties properties = new Properties();
-    Producer<String, Paper> producer;
+    Producer<String, String> producer;
     private int curElement = -1;
     private int ancestor = -1;
-    private Paper paper;
+    private DblpPublication paper;
     private Conference conf;
 
     public DblpParser(File file) throws Exception {
@@ -29,9 +33,9 @@ public class DblpParser {
             System.out.println("Parsing...");
 
             properties.setProperty("bootstrap.servers", "localhost:9092"); // IP address where Kafka is running
-            properties.put("value.serializer", "stream.PaperSerializer");
+            properties.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
             properties.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-            producer = new KafkaProducer<String, Paper>(properties);
+            producer = new KafkaProducer<String, String>(properties);
 
             SAXParserFactory parserFactory = SAXParserFactory.newInstance();
             SAXParser parser = parserFactory.newSAXParser();
@@ -64,16 +68,20 @@ public class DblpParser {
 
                 if (paper != null) {
 
-                    producer.send(new ProducerRecord<String, Paper>("dblp", paper));
-
-                    // TODO -> Push to kafka stream
-                    // System.out.println(paper);
+                    try {
+                        // convert publication to json and push to kafka broker
+                        String jsonPaper = mapper.writeValueAsString(paper);
+                        producer.send(new ProducerRecord<String, String>("dblp", jsonPaper));
+                    } catch (JsonProcessingException e) {
+                        e.printStackTrace();
+                    }
                 }
 
                 ancestor = Element.INPROCEEDING;
-                curElement = Paper.INPROCEEDING;
-                paper = new Paper();
-                paper.key = atts.getValue("key");
+                curElement = DblpPublication.INPROCEEDING;
+
+                paper = new DblpPublication();
+                paper.setKey(atts.getValue("key"));
             } else if (rawName.equals("proceedings")) {
                 ancestor = Element.PROCEEDING;
                 curElement = Conference.PROCEEDING;
@@ -84,7 +92,7 @@ public class DblpParser {
             }
 
             if (ancestor == Element.INPROCEEDING) {
-                curElement = Paper.getElement(rawName);
+                curElement = DblpPublication.getElement(rawName);
             } else if (ancestor == Element.PROCEEDING) {
                 curElement = Conference.getElement(rawName);
             } else if (ancestor == -1) {
@@ -100,16 +108,17 @@ public class DblpParser {
         public void characters(char[] ch, int start, int length) throws SAXException {
             if (ancestor == Element.INPROCEEDING) {
                 String str = new String(ch, start, length).trim();
-                if (curElement == Paper.AUTHOR) {
+                if (curElement == DblpPublication.AUTHOR) {
                     author.append(str);
-                } else if (curElement == Paper.CITE) {
-                    paper.citations.add(str);
-                } else if (curElement == Paper.CONFERENCE) {
-                    paper.conference = str;
-                } else if (curElement == Paper.TITLE) {
-                    paper.title += str;
-                } else if (curElement == Paper.YEAR) {
-                    paper.year = Integer.parseInt(str);
+                } else if (curElement == DblpPublication.CITE) {
+                    paper.getCitations().add(str);
+                } else if (curElement == DblpPublication.CONFERENCE) {
+                    paper.setConference(str);
+                } else if (curElement == DblpPublication.TITLE) {
+                    String tmpTitle = paper.getTitle();
+                    paper.setTitle(tmpTitle += str);
+                } else if (curElement == DblpPublication.YEAR) {
+                    paper.setYear(Integer.parseInt(str));
                 }
             } else if (ancestor == Element.PROCEEDING) {
                 String str = new String(ch, start, length).trim();
@@ -124,13 +133,13 @@ public class DblpParser {
         public void endElement(String namespaceURI, String localName, String rawName) throws SAXException {
 
             if (rawName.equals("author") && ancestor == Element.INPROCEEDING) {
-                paper.authors.add(author.toString().trim());
+                paper.getAuthors().add(author.toString().trim());
             }
 
             if (Element.getElement(rawName) == Element.INPROCEEDING) {
                 ancestor = -1;
 
-                if (paper.title.equals("") || paper.conference.equals("") || paper.year == 0) {
+                if (paper.getTitle().equals("") || paper.getConference().equals("") || paper.getYear() == 0) {
                     System.out.println("Error in parsing " + paper);
                     errors++;
                     return;
