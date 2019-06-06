@@ -124,10 +124,10 @@ public class ScipiStream {
         DataStream<String> kafkaDblpStream = environment.addSource(kafkaDblp);
 
         // first we map json strings from Kafka oag topic to Publication using OagPubMapper
-        DataStream<Publication> oagPublicationsStream = kafkaOagStream.flatMap(new PubMapper(oagTopic));
+        DataStream<Publication> oagPublicationsStream = kafkaOagStream.flatMap(new OagPubMapper());
 
         // then we map json strings from Kafka dblp topic to Publication using DblpPubMapper
-        DataStream<Publication> dblpPublicationStream = kafkaDblpStream.flatMap(new PubMapper(dblpTopic));
+        DataStream<Publication> dblpPublicationStream = kafkaDblpStream.flatMap(new DblpPubMapper());
 
         // combine both streams coming from different sources
         DataStream<Publication> publicationStream = oagPublicationsStream.union(dblpPublicationStream);
@@ -433,27 +433,158 @@ public class ScipiStream {
         }
     }
 
-    // mapper: string to POJO (Publication)
-    private static final class PubMapper implements FlatMapFunction<String, Publication> {
-
-        // where is the dataset coming from
-        private String datasetType;
-
-        public PubMapper(String datasetType) {
-            this.datasetType = datasetType;
-        }
+    // mapper: string to POJO (Publication) for OAG
+    private static final class OagPubMapper implements FlatMapFunction<String, Publication> {
 
         @Override
         public void flatMap(String value, Collector<Publication> out) throws Exception {
 
             // parse string/json to Publication
-            Publication publication = null;
+            Publication publication = oagGsonBuilder.fromJson(value, Publication.class);
 
-            if (datasetType == oagTopic) { // coming from oag
-                publication = oagGsonBuilder.fromJson(value, Publication.class);
-            } else { // coming from dblp
-                publication = dblpGsonBuilder.fromJson(value, Publication.class);
+            // validate language
+            String lang = validateStr(publication.getLang());
+
+            // do not accept empty language
+            if (lang == null) {
+                return;
             }
+
+            // do not accept non english publications
+            if (!lang.equals("en")) {
+                return;
+            }
+
+            // 1.0.2: validate doi
+            String doi = validateStr(publication.getDoi());
+
+            // do not accept empty doi
+            if (doi == null) {
+                return;
+            }
+
+            // set to trimmed/lowercase doi
+            publication.setDoi(doi);
+
+            // 1.0.3: validate title
+            String title = validateStr(publication.getTitle());
+
+            // do not accept empty title
+            if (title == null) {
+                return;
+            }
+
+            // set to trimmed/lowercase title
+            publication.setTitle(title);
+
+            // 1.0.4: validate publisher and venue
+            String publisher = validateStr(publication.getPublisher());
+            String venue = validateStr(publication.getVenue());
+
+            // must have at least publisher or venue
+            if (publisher == null && venue == null) {
+                return;
+            }
+
+            // if publisher not empty set trimmed/lowercase publisher
+            if (publisher != null) {
+                publication.setPublisher(publisher);
+            }
+
+            // if venue not empty set to trimmed/lowercase venue
+            if (venue != null) {
+                publication.setVenue(venue);
+            }
+
+            // 1.0.5: validate keywords and field of study
+            Set<String> keywords = publication.getKeywords();
+            boolean validKeywords = keywords != null && keywords.size() > 0;
+
+            Set<String> fos = publication.getFos();
+            boolean validFos = fos != null && fos.size() > 0;
+
+            // must have at least a keyword or field of study
+            if (!validKeywords && !validFos) {
+                return;
+            }
+
+            // 1.0.5.1: clean keywords and keep only valid ones
+            Set<String> vKeywords = validKeywords ? validateTopics(keywords) : null;
+
+            // 1.0.5.2: clean fos and keep only valid ones
+            Set<String> vFos = validFos ? validateTopics(fos) : null;
+
+            // check that at least some keywords or fos remain after cleaned
+            if ((vKeywords == null || vKeywords.size() <= 0) && (vFos == null || vFos.size() <= 0)) {
+                return;
+            }
+
+            // set to cleaned keywords
+            publication.setKeywords(vKeywords);
+
+            // set to cleaned fields of study
+            publication.setFos(vFos);
+
+            // 1.0.6: validate year
+            String year = validateStr(publication.getYear());
+
+            // do not accept empty year or invalid year
+            if (year == null || year.length() != 4) {
+                return;
+            }
+
+            // 1.0.6: validate authors
+            Set<String> authors = publication.getAuthors();
+            boolean validAuthors = authors != null && authors.size() > 0;
+
+            // must have at least one author
+            if (!validAuthors) {
+                return;
+            }
+
+            // 1.0.7.1: clean authors and keep only valid ones
+            Set<String> vAuthors = new HashSet<String>();
+            for (String author : authors) {
+                author = validateStr(author);
+
+                // do not accept empty author
+                if (author == null) {
+                    continue;
+                }
+
+                // keep only letters, numbers and spaces
+                author = author.replaceAll("[^a-zA-Z0-9\\s]", "");
+                if (author.isEmpty()) {
+                    continue;
+                }
+
+                // append cleaned author name
+                if (!vAuthors.contains(author)) {
+                    vAuthors.add(author);
+                }
+            }
+
+            // check that at least some authors remain after cleaned
+            if (vAuthors.size() <= 0) {
+                return;
+            }
+
+            // set to cleaned authors
+            publication.setAuthors(vAuthors);
+
+            // collect publication
+            out.collect(publication);
+        }
+    }
+
+    // mapper: string to POJO (Publication) for DBLP
+    private static final class DblpPubMapper implements FlatMapFunction<String, Publication> {
+
+        @Override
+        public void flatMap(String value, Collector<Publication> out) throws Exception {
+
+            // parse string/json to Publication
+            Publication publication = dblpGsonBuilder.fromJson(value, Publication.class);
 
             // validate language
             String lang = validateStr(publication.getLang());
@@ -663,7 +794,7 @@ public class ScipiStream {
 
         @Override
         public Tuple3<String, Long, Long> reduce(Tuple3<String, Long, Long> current,
-                                                       Tuple3<String, Long, Long> pre) throws Exception {
+                                                 Tuple3<String, Long, Long> pre) throws Exception {
 
             // emit reduced tuple (year, single, joint)
             return new Tuple3<String, Long, Long>(current.f0, current.f1 + pre.f1, current.f2 + pre.f2);
@@ -751,7 +882,7 @@ public class ScipiStream {
 
         @Override
         public Tuple3<String, Long, Long> reduce(Tuple3<String, Long, Long> current,
-                                                       Tuple3<String, Long, Long> prev) throws Exception {
+                                                 Tuple3<String, Long, Long> prev) throws Exception {
 
             // emit reduced tuple: (year, no. authors, no. publications)
             return new Tuple3<String, Long, Long>(current.f0, current.f1 + prev.f1, current.f2 + prev.f2);
@@ -784,15 +915,15 @@ public class ScipiStream {
 
             // get authors
             Set<String> authors = publication.getAuthors();
-            if(authors.size() < 500){
+            if (authors.size() < 100) {
                 return;
             }
 
-            // get title
-            String title = publication.getTitle();
+            // get year
+            String year = publication.getYear();
 
             // publication has more than 500 authors
-            out.collect(new Tuple2<String, Long>(title, 1L));
+            out.collect(new Tuple2<String, Long>(year, 1L));
         }
     }
 }

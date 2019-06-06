@@ -79,9 +79,6 @@ TRUNCATE scipi.authorptrn;
 TRUNCATE scipi.aap;
 TRUNCATE scipi.hyper_authorship;
 
-CREATE TABLE IF NOT EXISTS scipi.topkw(keyword text, count int,  PRIMARY KEY(keyword));
-
-
 Kafka topics 
 -------------
 repos/kafka_2.12-2.2.0/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic oag

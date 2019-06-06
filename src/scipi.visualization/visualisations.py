@@ -12,8 +12,7 @@ from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
 init_notebook_mode(connected=True)
 
 # TODO: Check this out: https://www.natureindex.com/news-blog/paper-authorship-goes-hyper
-# TODO: write comments for methods and init  + close session !!!!
-# TODO: style tables 
+# TODO: write comments for methods and init  
 
 class ScipiVisual():
 
@@ -23,10 +22,10 @@ class ScipiVisual():
     # TODO -> add _ prefix indicates private
     # CassandraDB tables 
     cassandra_tbls = {
-        "topkw": "topkw", # holds the top 100 keywords by count
-        "authorship": "authorptrn", # holds authorship patterns 
-        "yrdist": "yrwisedist", # holds year-wise distribution: single author vs co-authored
-        "avgauthors" : "aap" # holds the avg number of authors per paper (AAP)
+        "authorship": "authorptrn",       # holds authorship patterns 
+        "yrdist": "yrwisedist",           # holds year-wise distribution: single author vs co-authored
+        "avgauthors": "aap",              # holds the avg number of authors per paper (AAP)
+        "hyperauthor": "hyper_authorship" # holds the hyper authorship count (publications with more than 100 authors)
     }
 
     # vertex type symbols 
@@ -53,13 +52,6 @@ class ScipiVisual():
 
     def pandas_factory(self, colnames, rows):
         return pd.DataFrame(rows, columns=colnames)
-
-    def plot_bubble_topics(self):
-        table = self.cassandra_tbls["topkw"]
-        df = self.session.execute("SELECT keyword, count FROM " + table + ";",
-                                  timeout=None)._current_rows
-        
-        display(df)
 
     def plot_authorship_ptrn(self, cutoff):
         
@@ -209,7 +201,7 @@ class ScipiVisual():
         # set year column as index
         df.set_index("year", inplace=True)
         
-         # sort dataframe by year 
+        # sort dataframe by year 
         df.sort_values(by=["year"], 
                        ascending=False, 
                        inplace=True)
@@ -254,6 +246,59 @@ class ScipiVisual():
                                        kind="scatter",
                                        xTitle="Years",
                                        yTitle="AAP",
+                                       title=tbl_title))    
+
+    # TODO -> Show table 
+    def plot_hyper_authorship(self, earliest):
+
+        # get results from aap as a pandas dataframe 
+        table = self.cassandra_tbls["hyperauthor"]
+        df = self.session.execute("SELECT hyper_authorship_year, hyper_authorship_count FROM " + table + ";",
+                                  timeout=None)._current_rows
+
+        # convert year to numeric 
+        df[["hyper_authorship_year"]] = df[["hyper_authorship_year"]].apply(pd.to_numeric) 
+        
+        # get only records which are greater or equal to the year passed
+        df = df[(df["hyper_authorship_year"] >= earliest)]
+
+        # set column names 
+        df.columns = ["year", "No. of Publications"]
+
+        # set year column as index
+        df.set_index("year", inplace=True)
+
+        # sort dataframe by year 
+        df.sort_values(by=["year"], 
+                       ascending=False, 
+                       inplace=True)
+        
+        # set table title 
+        first_year = df.head(1).index.values[0]
+        last_year = df.tail(1).index.values[0]
+        tbl_title = "Publications with >= 100 Authors from {} to {}.".format(first_year, last_year)
+
+        # show table using pyplot 
+        trace = go.Table(
+                header=dict(values=["year"] + list(df.columns),
+                            fill = dict(color='#C2D4FF'),
+                            align = ['left'] * 5),
+                cells=dict(values=[df.index.values, 
+                                   df["No. of Publications"]],
+               fill = dict(color='#F5F8FF'),
+               align = ['left'] * 5))
+
+        layout = dict(width=800, height=300)
+        table_result = [trace] 
+        fig = dict(data=table_result, layout=layout)
+        iplot(fig, filename = "pandas_table")
+
+        # plot authorship goes hyper
+        iplot(df[["No. of Publications"]].iplot(
+                                       asFigure=True,
+                                       kind="scatter",
+                                       xTitle="Year",
+                                       yTitle="No. of Publications",
                                        title=tbl_title))    
 
     def plot_community(self, layout, community_colors):
@@ -517,7 +562,6 @@ class ScipiVisual():
         table_result = [trace] 
         fig = dict(data=table_result, layout=tbl_layout)
         iplot(fig, filename = "pandas_table")
-
 
         # create the node trace for the plot
         node_trace = go.Scatter(
