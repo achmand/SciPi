@@ -2,10 +2,14 @@
 
 ###### importing dependencies #############################################
 import csv
+import subprocess
 import pandas as pd
 import networkx as nx
 import cufflinks as cf
+from ipywidgets import widgets
 import plotly.graph_objs as go
+from sklearn import preprocessing
+from IPython.display import display
 from cassandra.cluster import Cluster
 from IPython.core.display import display, HTML
 from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
@@ -19,7 +23,6 @@ class ScipiVisual():
     # only one keyspace is used to interact with scipi datae
     _keyspace = "scipi"
 
-    # TODO -> add _ prefix indicates private
     # CassandraDB tables 
     cassandra_tbls = {
         "authorship": "authorptrn",       # holds authorship patterns 
@@ -248,7 +251,6 @@ class ScipiVisual():
                                        yTitle="AAP",
                                        title=tbl_title))    
 
-    # TODO -> Show table 
     def plot_hyper_authorship(self, earliest):
 
         # get results from aap as a pandas dataframe 
@@ -301,10 +303,65 @@ class ScipiVisual():
                                        yTitle="No. of Publications",
                                        title=tbl_title))    
 
-    def plot_community(self, layout, community_colors):
+    # apply community detection using field of study 
+    def apply_community_detection_fos(self, sender):
+        
+        # apply community detection using flink 
+        print("Applying community detection using Domain/s: {}".format(sender.value))
+        self.apply_community_detection(values=sender.value, 
+                                       script_path="../scripts/local_flink_community_fos.sh")
+
+    # apply community detection using keywords 
+    def apply_community_detection_kw(self, sender):
+        
+        # apply community detection using flink 
+        print("Applying community detection using Keywords/s: {}".format(sender.value))
+        self.apply_community_detection(values=sender.value, 
+                                       script_path="../scripts/local_flink_community_kw.sh")
+
+    def apply_community_detection(self, values, script_path):
+
+        # script_path = "../scripts/local_flink_community_kw.sh"
+        shellscript = subprocess.Popen([script_path, values, self.community_result_path], stdin=subprocess.PIPE)
+        
+        # blocks until shellscript is done
+        shellscript.stdin.close()
+        shellscript.wait()   
+
+        # plot results 
+        # plot dense communities in publication network
+        # plot network using twopi layout for community #1
+        self.plot_community(layout="twopi", 
+                            community_colors=self.community_colors,
+                            result_path=self.community_result_path)
+
+        # print job completed
+        print("Job Completed")
+
+    def community_detection(self, community_colors, result_path):
+        print("IMPORTANT: Wait for print complete to continue and press ENTER ONCE on one text box\n")
+        
+        # set community variables
+        self.community_colors = community_colors
+        self.community_result_path = result_path
+
+        # input if you want to use keywords 
+        print("Apply Community Detection using keywords (Comma Separated) - PRESS ENTER")
+        keywords_text = widgets.Text()
+        display(keywords_text)
+        keywords_text.on_submit(self.apply_community_detection_kw)
+
+        # input if you want to use field of study 
+        print("Apply Community Detection using fields of study (Comma Separated) - PRESS ENTER")
+        domain_text = widgets.Text()
+        display(domain_text)
+        domain_text.on_submit(self.apply_community_detection_fos)
+
+    def plot_community(self, layout, community_colors, result_path):
         
         # get edges result 
-        with open("output2.txt") as f:
+        path = "{}{}".format(result_path, "/communitySample.csv")
+        with open(path) as f:
             data=[tuple(line) for line in csv.reader(f)]
 
         # create a new graph 
@@ -408,6 +465,26 @@ class ScipiVisual():
 
         # print total nodes & edges
         print("No. Nodes: {}\nNo. Edges: {}".format(G.number_of_nodes(), G.number_of_edges()))
+
+        # show all communities and it's count 
+        path = "{}{}".format(result_path, "/communityLabelCount.csv")
+        community_count = pd.read_csv(path,header=None)
+        community_count.columns = ["Labels", "Count"]
+
+        # print stats
+        print("\n\nCommunity Detection Stats\n##############################")
+        print("Total No. of Communities with >= 500 entities (dense communities): {}".format(community_count.shape[0]))
+        total_entites = community_count["Count"].sum() 
+        
+        print("Total Entities in these Communities: {}".format(total_entites))
+        
+        community_count["Count"] = pd.to_numeric(community_count["Count"], 
+                                                 downcast="float")
+
+        count_sum = community_count["Count"].sum()       
+        community_count["Weighted score"] = round(community_count["Count"] * (community_count["Count"] / count_sum), 2)
+        collaboration_strength = community_count["Weighted score"].sum() / 100
+        print("Strength between these Communities using weighted avg. : {:.2f}".format(collaboration_strength))
 
     # TODO -> show table too 
     def plot_author_keyword(self, layout):

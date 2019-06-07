@@ -19,49 +19,35 @@ Parameters
 // importing packages
 
 import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.Session;
-import info.debatty.java.stringsimilarity.Cosine;
-import org.apache.flink.api.common.functions.*;
+import org.apache.flink.api.common.functions.FilterFunction;
+import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.operators.Order;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
-import org.apache.flink.api.java.functions.KeySelector;
-import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.tuple.Tuple6;
 import org.apache.flink.api.java.utils.DataSetUtils;
 import org.apache.flink.api.java.utils.ParameterTool;
-import org.apache.flink.batch.connectors.cassandra.CassandraInputFormat;
 import org.apache.flink.batch.connectors.cassandra.CassandraPojoInputFormat;
-import org.apache.flink.batch.connectors.cassandra.CassandraTupleOutputFormat;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.graph.Edge;
 import org.apache.flink.graph.Graph;
 import org.apache.flink.graph.Vertex;
 import org.apache.flink.graph.VertexJoinFunction;
 import org.apache.flink.graph.asm.translate.TranslateFunction;
-import org.apache.flink.graph.bipartite.BipartiteEdge;
-import org.apache.flink.graph.bipartite.BipartiteGraph;
 import org.apache.flink.graph.library.CommunityDetection;
-import org.apache.flink.streaming.api.functions.windowing.delta.CosineDistance;
 import org.apache.flink.streaming.connectors.cassandra.ClusterBuilder;
-import org.apache.flink.types.NullValue;
 import org.apache.flink.util.Collector;
 import publication.Publication;
-import scala.Int;
 
-import java.util.*;
+import java.util.HashSet;
+import java.util.Set;
 
-public class ScipiBatch {
-
-    // holds the keywords passed as an input
-    final static HashSet<String> definedKeywords = new HashSet<String>();
-
-    // holds the domains passed as an input
-    final static HashSet<String> definedDomains = new HashSet<String>();
+public class ScipiBatchCommunity {
 
     public static void main(String[] args) throws Exception {
 
@@ -92,19 +78,25 @@ public class ScipiBatch {
         };
 
         // gets input for keywords (comma separated)
-        final String[] keywords = parameters.get("keywords").split("\\s*,\\s*");
+        final HashSet<String> definedKeywords = new HashSet<String>();
+        if(parameters.get("keywords") != null) {
+            final String[] keywords = parameters.get("keywords").split("\\s*,\\s*");
 
-        // add keywords to keywords set
-        for (String keyword : keywords) {
-            definedKeywords.add(keyword);
+            // add keywords to keywords set
+            for (String keyword : keywords) {
+                definedKeywords.add(keyword.toLowerCase());
+            }
         }
 
         // gets input for domains (comma separated)
-        final String[] domains = parameters.get("domains").split("\\s*,\\s*");
+        final HashSet<String> definedDomains = new HashSet<String>();
+        if(parameters.get("domains") != null) {
+            final String[] domains = parameters.get("domains").split("\\s*,\\s*");
 
-        // add domain to domains set
-        for (String domain : domains) {
-            definedDomains.add(domain);
+            // add domain to domains set
+            for (String domain : domains) {
+                definedDomains.add(domain.toLowerCase());
+            }
         }
 
         // gets inputs for results save only samples, paths, etc
@@ -145,19 +137,22 @@ public class ScipiBatch {
 
                         // check if it contains at least one keyword from input
                         Set<String> publicationKeywords = publication.getKeywords();
-                        Set<String> intersection = new HashSet<String>(definedKeywords);
-                        intersection.retainAll(publicationKeywords);
-                        if (!intersection.isEmpty()) {
-                            return true; // a keyword intersected
+                        if (publicationKeywords != null && publicationKeywords.size() > 0) {
+                            for (String keyword : publicationKeywords) {
+                                if (definedKeywords.contains(keyword)) {
+                                    return true;
+                                }
+                            }
                         }
 
                         // check if it contains at least one domain from input
                         Set<String> publicationDomains = publication.getFos();
-                        intersection.clear();
-                        intersection.addAll(definedDomains);
-                        intersection.retainAll(publicationDomains);
-                        if (!intersection.isEmpty()) {
-                            return true; // a domain intersected
+                        if (publicationDomains != null && publicationDomains.size() > 0) {
+                            for (String domain : publicationDomains) {
+                                if (definedDomains.contains(domain)) {
+                                    return true;
+                                }
+                            }
                         }
 
                         return false; // no keyword or domain intersected
@@ -178,8 +173,7 @@ public class ScipiBatch {
 
         // create an undirected publication network graph
         Graph<String, PubVertexValue, Double> networkGraph = Graph
-                .fromDataSet(networkVertices, networkEdges, environment)
-                .getUndirected();
+                .fromDataSet(networkVertices, networkEdges, environment);
 
         // create dataset made up of (VertexId, UniqueLabel)
         // these unique labels will be the initial values for each vertex when applying
@@ -215,7 +209,7 @@ public class ScipiBatch {
         // > map vertices to (Label, 1)
         // > group by label
         // > sum on second value in the tuple
-        // > we define a community if it has at least fifteen vertices with the same label, filtered by count
+        // > we define a community if it has at 500 vertices with the same label, filtered by count
         DataSet<Tuple2<Long, Long>> communityLabelsCount = communityGraph
                 .getVertices()
                 .map(new MapFunction<Vertex<String, Long>, Tuple2<Long, Long>>() {
@@ -231,9 +225,13 @@ public class ScipiBatch {
                 .filter(new FilterFunction<Tuple2<Long, Long>>() {
                     @Override
                     public boolean filter(Tuple2<Long, Long> value) throws Exception {
-                        return value.f1 > 14;
+                        return value.f1 >= 500;
                     }
                 });
+
+        // save the community label count
+        communityLabelsCount.writeAsCsv(resultsPath + "/communityLabelCount.csv",
+                                        FileSystem.WriteMode.OVERWRITE);
 
         // get the most dense communities/labels
         final HashSet<Long> denseLabels = new HashSet<Long>(communityLabelsCount
@@ -294,14 +292,14 @@ public class ScipiBatch {
                     public Tuple2<String, String> map(Edge<String, Double> edge) throws Exception {
                         return new Tuple2<String, String>(edge.getSource(), edge.getTarget());
                     }
-                }).distinct();   // must only get unique edges (since undirected)
+                }).distinct();
 
         // save CommunityDetection results
 
         // saves only sample
         if (saveOnlySample) {
 
-            // get result sample result only
+            // get result sample result only (name, type, label, name, type, label)
             DataSet<Tuple6<String, String, Long, String, String, Long>> denseCommunityVerticesEdges =
                     denseCommunityEdges.first(totalSamples)
                             .join(denseCommunityVertices)
@@ -343,9 +341,9 @@ public class ScipiBatch {
             // save sample result to specified path
             denseCommunityVerticesEdges.first(totalSamples)
                     .writeAsCsv(
-                    resultsPath + "/communitySample.csv",
-                    FileSystem.WriteMode.OVERWRITE // overwrite existing file if exists
-            );
+                            resultsPath + "/communitySample.csv",
+                            FileSystem.WriteMode.OVERWRITE // overwrite existing file if exists
+                    );
         }
 
         // END Community Detection /////////////////////////////////////////////////
@@ -603,7 +601,7 @@ public class ScipiBatch {
 //        denseCommunityVerticesEdges.writeAsCsv("/home/delinvas/repos/SciPi/output2");
 //        communityLabelsCount.writeAsCsv("/home/delinvas/repos/SciPi/output3");
 
-        // execute job 
+        // execute job
         environment.execute("scipi batch processing");
     }
 
