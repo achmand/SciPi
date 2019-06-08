@@ -263,102 +263,115 @@ public class ScipiStream {
         public Publication deserialize(JsonElement jsonElement,
                                        Type type,
                                        JsonDeserializationContext jsonDeserializationContext)
-                throws JsonParseException {
+                throws JsonParseException, UnsupportedOperationException {
 
-            // get json object
-            JsonObject jsonObject = jsonElement.getAsJsonObject();
+            try {
+                // get json object
+                JsonObject jsonObject = jsonElement.getAsJsonObject();
+                if(jsonObject == null){
+                    return null;
+                }
 
-            // get keywords
-            HashSet<String> keywords = null;
+                // get keywords
+                HashSet<String> keywords = null;
 
-            // check that json array is not empty
-            if (jsonObject.get("keywords") != null) {
-                JsonArray jsonKeywords = jsonObject.get("keywords").getAsJsonArray();
-                if (jsonKeywords.size() > 0) {
-                    keywords = new HashSet<String>(jsonKeywords.size());
-                    for (JsonElement keyword : jsonKeywords) {
-                        if (!keywords.contains(keyword)) {
-                            keywords.add(keyword.getAsString());
+                // check that json array is not empty
+                if (jsonObject.get("keywords") != null) {
+                    JsonArray jsonKeywords = jsonObject.get("keywords").getAsJsonArray();
+                    if (jsonKeywords.size() > 0) {
+                        keywords = new HashSet<String>(jsonKeywords.size());
+                        for (JsonElement keyword : jsonKeywords) {
+                            if (!keywords.contains(keyword)) {
+                                keywords.add(keyword.getAsString());
+                            }
                         }
                     }
                 }
-            }
 
-            // get authors
-            HashSet<String> authors = null;
+                // get authors
+                HashSet<String> authors = null;
 
-            // check that json array is not empty
-            if (jsonObject.get("authors") != null) {
-                JsonArray jsonAuthors = jsonObject.get("authors").getAsJsonArray();
-                if (jsonAuthors.size() > 0) {
-                    authors = new HashSet<String>(jsonAuthors.size());
-                    for (JsonElement author : jsonAuthors) {
-                        String authorName = author.getAsJsonObject().get("name").getAsString();
-                        if (!authors.contains(authorName)) {
-                            authors.add(authorName);
+                // check that json array is not empty
+                if (jsonObject.get("authors") != null) {
+                    JsonArray jsonAuthors = jsonObject.get("authors").getAsJsonArray();
+                    if (jsonAuthors.size() > 0) {
+                        authors = new HashSet<String>(jsonAuthors.size());
+                        for (JsonElement author : jsonAuthors) {
+                            String authorName = author.getAsJsonObject().get("name").getAsString();
+                            if (!authors.contains(authorName)) {
+                                authors.add(authorName);
+                            }
                         }
                     }
                 }
-            }
 
-            // get fos
-            HashSet<String> fos = null;
+                // get fos
+                HashSet<String> fos = null;
 
-            // check that json array is not empty
-            if (jsonObject.get("fos") != null) {
-                JsonArray jsonFos = jsonObject.get("fos").getAsJsonArray();
-                if (jsonFos.size() > 0) {
-                    fos = new HashSet<String>(jsonFos.size());
-                    for (JsonElement field : jsonFos) {
-                        if (!fos.contains(field)) {
-                            fos.add(field.getAsString());
+                // check that json array is not empty
+                if (jsonObject.get("fos") != null) {
+                    JsonArray jsonFos = jsonObject.get("fos").getAsJsonArray();
+                    if (jsonFos.size() > 0) {
+                        fos = new HashSet<String>(jsonFos.size());
+                        for (JsonElement field : jsonFos) {
+                            if (!fos.contains(field)) {
+                                fos.add(field.getAsString());
+                            }
                         }
                     }
                 }
-            }
 
-            String doi = null;
-            if (jsonObject.get("doi") != null) {
-                doi = jsonObject.get("doi").getAsString();
-            }
+                String doi = null;
+                if (jsonObject.get("doi") != null) {
+                    doi = jsonObject.get("doi").getAsString();
+                }
 
-            String title = null;
-            if (jsonObject.get("title") != null) {
-                title = jsonObject.get("title").getAsString();
-            }
+                String title = null;
+                if (jsonObject.get("title") != null) {
+                    title = jsonObject.get("title").getAsString();
+                }
 
-            String publisher = null;
-            if (jsonObject.get("publisher") != null) {
-                publisher = jsonObject.get("publisher").getAsString();
-            }
+                String publisher = null;
+                if (jsonObject.get("publisher") != null) {
+                    publisher = jsonObject.get("publisher").getAsString();
+                }
 
-            String venue = null;
-            if (jsonObject.get("venue") != null) {
-                venue = jsonObject.get("venue").getAsString();
-            }
+                String venue = null;
+                if (jsonObject.get("venue") != null) {
+                    venue = jsonObject.get("venue").getAsString();
+                }
 
-            String lang = null;
-            if (jsonObject.get("lang") != null) {
-                lang = jsonObject.get("lang").getAsString();
-            }
+                String lang = null;
+                if (jsonObject.get("lang") != null) {
+                    lang = jsonObject.get("lang").getAsString();
+                }
 
-            String year = null;
-            if (jsonObject.get("year") != null) {
-                year = jsonObject.get("year").getAsString();
-            }
+                String year = null;
+                if (jsonObject.get("year") != null) {
+                    year = jsonObject.get("year").getAsString();
+                }
 
-            // return publication
-            return new Publication(
-                    doi,
-                    title,
-                    publisher,
-                    venue,
-                    lang,
-                    keywords,
-                    year,
-                    authors,
-                    fos,
-                    oagTopic);
+                // return publication
+                return new Publication(
+                        doi,
+                        title,
+                        publisher,
+                        venue,
+                        lang,
+                        keywords,
+                        year,
+                        authors,
+                        fos,
+                        oagTopic);
+            } catch (JsonParseException ex) {
+                return null;
+            }
+            catch (UnsupportedOperationException ex){
+                return null;
+            }
+            catch (Exception ex){
+                return null;
+            }
         }
     }
 
@@ -368,68 +381,83 @@ public class ScipiStream {
         @Override
         public Publication deserialize(JsonElement jsonElement,
                                        Type type,
-                                       JsonDeserializationContext jsonDeserializationContext) throws JsonParseException {
+                                       JsonDeserializationContext jsonDeserializationContext)
+                throws JsonParseException, UnsupportedOperationException {
 
-            // get json object
-            JsonObject jsonObject = jsonElement.getAsJsonObject();
+            try {
 
-            // for publications coming from DBLP we will add computer science as keyword
-            HashSet<String> keywords = new HashSet<String>(1);
-            keywords.add("computer science");
+                // get json object
+                JsonObject jsonObject = jsonElement.getAsJsonObject();
+                if(jsonObject == null){
+                    return null;
+                }
 
-            // for publications coming from DBLP we will add computer science as field of study
-            HashSet<String> fos = new HashSet<String>(1);
-            fos.add("computer science");
+                // for publications coming from DBLP we will add computer science as keyword
+                HashSet<String> keywords = new HashSet<String>(1);
+                keywords.add("computer science");
 
-            // get authors
-            HashSet<String> authors = null;
+                // for publications coming from DBLP we will add computer science as field of study
+                HashSet<String> fos = new HashSet<String>(1);
+                fos.add("computer science");
 
-            // check that json array is not empty
-            if (jsonObject.get("authors") != null) {
-                JsonArray jsonAuthors = jsonObject.get("authors").getAsJsonArray();
-                if (jsonAuthors.size() > 0) {
-                    authors = new HashSet<String>(jsonAuthors.size());
-                    for (JsonElement author : jsonAuthors) {
-                        String authorName = author.getAsString();
-                        if (!authors.contains(authorName)) {
-                            authors.add(authorName);
+                // get authors
+                HashSet<String> authors = null;
+
+                // check that json array is not empty
+                if (jsonObject.get("authors") != null) {
+                    JsonArray jsonAuthors = jsonObject.get("authors").getAsJsonArray();
+                    if (jsonAuthors.size() > 0) {
+                        authors = new HashSet<String>(jsonAuthors.size());
+                        for (JsonElement author : jsonAuthors) {
+                            String authorName = author.getAsString();
+                            if (!authors.contains(authorName)) {
+                                authors.add(authorName);
+                            }
                         }
                     }
                 }
-            }
 
-            String key = null;
-            if (jsonObject.get("key") != null) {
-                key = jsonObject.get("key").getAsString();
-            }
+                String key = null;
+                if (jsonObject.get("key") != null) {
+                    key = jsonObject.get("key").getAsString();
+                }
 
-            String title = null;
-            if (jsonObject.get("title") != null) {
-                title = jsonObject.get("title").getAsString();
-            }
+                String title = null;
+                if (jsonObject.get("title") != null) {
+                    title = jsonObject.get("title").getAsString();
+                }
 
-            String venue = null;
-            if (jsonObject.get("conference") != null) {
-                venue = jsonObject.get("conference").getAsString();
-            }
+                String venue = null;
+                if (jsonObject.get("conference") != null) {
+                    venue = jsonObject.get("conference").getAsString();
+                }
 
-            String year = null;
-            if (jsonObject.get("year") != null) {
-                year = jsonObject.get("year").getAsString();
-            }
+                String year = null;
+                if (jsonObject.get("year") != null) {
+                    year = jsonObject.get("year").getAsString();
+                }
 
-            // return publication
-            return new Publication(
-                    key,
-                    title,
-                    null,
-                    venue,
-                    "en",
-                    keywords,
-                    year,
-                    authors,
-                    fos,
-                    dblpTopic);
+                // return publication
+                return new Publication(
+                        key,
+                        title,
+                        null,
+                        venue,
+                        "en",
+                        keywords,
+                        year,
+                        authors,
+                        fos,
+                        dblpTopic);
+            } catch (JsonParseException ex) {
+                return null;
+            }
+            catch (UnsupportedOperationException ex){
+                return null;
+            }
+            catch (Exception ex){
+                return null;
+            }
         }
     }
 
@@ -441,6 +469,9 @@ public class ScipiStream {
 
             // parse string/json to Publication
             Publication publication = oagGsonBuilder.fromJson(value, Publication.class);
+            if (publication == null) {
+                return;
+            }
 
             // validate language
             String lang = validateStr(publication.getLang());
@@ -585,6 +616,9 @@ public class ScipiStream {
 
             // parse string/json to Publication
             Publication publication = dblpGsonBuilder.fromJson(value, Publication.class);
+            if (publication == null) {
+                return;
+            }
 
             // validate language
             String lang = validateStr(publication.getLang());
