@@ -315,7 +315,7 @@ class ScipiVisual():
         print("Executing {}".format(script_path))
         
         # get results path 
-        results_path = "{}{}".format(self.scipi_path + "/results", result_path)
+        results_path = "{}{}".format(self.scipi_path + "/results", result_path) if self.is_local else "s3://scipiresults/topics"
         
         # script_path = "../scripts/local_flink_community_kw.sh"
         shellscript = subprocess.Popen([script_path, 
