@@ -1,7 +1,7 @@
 #!/bin/bash
 
 /home/delinvas/repos/flink/build-target/bin/flink \
-run -c batch.ScipiBatchCommunity /home/delinvas/repos/SciPi/src/scipi/out/artifacts/scipi_batch_community_jar/scipi_batch.jar \
+run -c batch.ScipiBatchCommunity /home/delinvas/repos/SciPi/src/scipi/jars/scipi_community.jar \
 --cassandra_point 127.0.0.1 \
 --domains "$1" \
 --results_path "$2" \
@@ -10,4 +10,4 @@ run -c batch.ScipiBatchCommunity /home/delinvas/repos/SciPi/src/scipi/out/artifa
 --community_iterations 10 \
 --community_delta 0.5 \
 --n_top_communities 3 \
---n_dense_community 150
+--n_dense_community 100

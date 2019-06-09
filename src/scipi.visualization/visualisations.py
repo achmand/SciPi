@@ -357,6 +357,37 @@ class ScipiVisual():
         display(domain_text)
         domain_text.on_submit(self.apply_community_detection_fos)
 
+    def apply_association_analysis(self, sender):
+
+        script_path = "../scripts/local_flink_association.sh"
+        shellscript = subprocess.Popen([script_path, sender.value, self.association_result_path], stdin=subprocess.PIPE)
+        
+        # blocks until shellscript is done
+        shellscript.stdin.close()
+        shellscript.wait()      
+
+        # show plots 
+        # plot association between authors & keywords based on Title 
+        self.plot_author_keyword(layout="neato")
+
+        # plot author clustering based on keyword/potential collaborators 
+        g_layout_dot="dot" # hierarchical
+        self.plot_author_clustering(layout=g_layout_dot) # plot potential collaborators network
+
+        # print job completed
+        print("Job Completed")
+
+    def author_association(self, result_path):
+        print("IMPORTANT: Wait for print complete to continue and press ENTER ONCE on one text box\n")
+
+        self.association_result_path = result_path
+
+        # input for keywords to apply association/correlation analysis 
+        print("Keywords to apply association/correlation analysis (Comma Separated) - PRESS ENTER")
+        association_text = widgets.Text()
+        display(association_text)
+        association_text.on_submit(self.apply_association_analysis)
+
     def plot_community(self, layout, community_colors, result_path):
         
         # get edges result 
@@ -486,11 +517,13 @@ class ScipiVisual():
         collaboration_strength = community_count["Weighted score"].sum() / 100
         print("Strength between these Communities using weighted avg. : {:.2f}".format(collaboration_strength))
 
-    # TODO -> show table too 
     def plot_author_keyword(self, layout):
         
+        # path for result
+        path = "{}{}".format(self.association_result_path, "/authorKwSample.csv")
+        
         # get author to keywords edges result 
-        with open("association_kw_authors.csv") as f:
+        with open(path) as f:
             data=[tuple(line) for line in csv.reader(f)]
 
         # create a new graph 
@@ -586,9 +619,12 @@ class ScipiVisual():
         print("No. Nodes: {}\nNo. Edges: {}".format(G.number_of_nodes(), G.number_of_edges()))
 
     def plot_author_clustering(self, layout):
-          
+        
+        # path for result
+        path = "{}{}".format(self.association_result_path, "/authorsCollabSample.csv")
+        
         # get author edges result 
-        with open("clustering_authors.csv") as f:
+        with open(path) as f:
             data=[tuple(line) for line in csv.reader(f)]
 
         # create a new graph 
