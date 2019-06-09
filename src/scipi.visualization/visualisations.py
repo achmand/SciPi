@@ -40,7 +40,7 @@ class ScipiVisual():
         "KEYWORD": "hexagram-dot"
     }
 
-    def __init__(self, cassandra_points):
+    def __init__(self, cassandra_points, scipi_path, is_local):
         
         # connecting to cluster & setting up session
         self.cluster = Cluster(cassandra_points)
@@ -51,7 +51,13 @@ class ScipiVisual():
         self.session.row_factory = self.pandas_factory
 
         # set default fetch size to unlimited 
-        self.session.default_fetch_size = None            
+        self.session.default_fetch_size = None     
+
+        # set path where scipi is located 
+        self.scipi_path = scipi_path     
+
+        # set whether executing on local or cloud environment 
+        self.is_local = is_local
 
     def pandas_factory(self, colnames, rows):
         return pd.DataFrame(rows, columns=colnames)
@@ -306,23 +312,39 @@ class ScipiVisual():
     # apply community detection using field of study 
     def apply_community_detection_fos(self, sender):
         
+        # get src for bash according to execution env
+        bash_src = "/src/scripts/local_flink_community_fos.sh" if self.is_local else "/src/scripts/cloud_flink_community_fos.sh"
+        script_path = "{}{}".format(self.scipi_path, bash_src)
+        print("Executing {}".format(script_path))
+
         # apply community detection using flink 
         print("Applying community detection using Domain/s: {}".format(sender.value))
         self.apply_community_detection(values=sender.value, 
-                                       script_path="../scripts/local_flink_community_fos.sh")
+                                       script_path=script_path)
 
     # apply community detection using keywords 
     def apply_community_detection_kw(self, sender):
         
+        # get src for bash according to execution env
+        bash_src = "/src/scripts/local_flink_community_kw.sh" if self.is_local else "/src/scripts/cloud_flink_community_kw.sh"
+        script_path = "{}{}".format(self.scipi_path, bash_src)
+        print("Executing {}".format(script_path))
+
         # apply community detection using flink 
         print("Applying community detection using Keywords/s: {}".format(sender.value))
         self.apply_community_detection(values=sender.value, 
-                                       script_path="../scripts/local_flink_community_kw.sh")
+                                       script_path=script_path)
 
     def apply_community_detection(self, values, script_path):
 
+        # get results path 
+        results_path = "{}{}".format(self.scipi_path + "/results", self.community_result_path)
+        
         # script_path = "../scripts/local_flink_community_kw.sh"
-        shellscript = subprocess.Popen([script_path, values, self.community_result_path], stdin=subprocess.PIPE)
+        shellscript = subprocess.Popen([script_path, 
+                                        self.scipi_path, 
+                                        values, 
+                                        results_path], stdin=subprocess.PIPE)
         
         # blocks until shellscript is done
         shellscript.stdin.close()
@@ -333,7 +355,7 @@ class ScipiVisual():
         # plot network using twopi layout for community #1
         self.plot_community(layout="twopi", 
                             community_colors=self.community_colors,
-                            result_path=self.community_result_path)
+                            result_path=results_path)
 
         # print job completed
         print("Job Completed")
@@ -359,8 +381,18 @@ class ScipiVisual():
 
     def apply_association_analysis(self, sender):
 
-        script_path = "../scripts/local_flink_association.sh"
-        shellscript = subprocess.Popen([script_path, sender.value, self.association_result_path], stdin=subprocess.PIPE)
+        # get src for bash according to execution env
+        bash_src = "/src/scripts/local_flink_association.sh" if self.is_local else "/src/scripts/cloud_flink_association.sh"
+        script_path = "{}{}".format(self.scipi_path, bash_src)
+        print("Executing {}".format(script_path))
+
+        # get results path 
+        results_path = "{}{}".format(self.scipi_path + "/results", self.association_result_path)
+
+        shellscript = subprocess.Popen([script_path,
+                                        self.scipi_path,
+                                        sender.value, 
+                                        results_path], stdin=subprocess.PIPE)
         
         # blocks until shellscript is done
         shellscript.stdin.close()
@@ -520,7 +552,7 @@ class ScipiVisual():
     def plot_author_keyword(self, layout):
         
         # path for result
-        path = "{}{}".format(self.association_result_path, "/authorKwSample.csv")
+        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorKwSample.csv")
         
         # get author to keywords edges result 
         with open(path) as f:
@@ -621,7 +653,7 @@ class ScipiVisual():
     def plot_author_clustering(self, layout):
         
         # path for result
-        path = "{}{}".format(self.association_result_path, "/authorsCollabSample.csv")
+        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorsCollabSample.csv")
         
         # get author edges result 
         with open(path) as f:
