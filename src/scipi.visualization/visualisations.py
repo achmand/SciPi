@@ -2,6 +2,7 @@
 
 ###### importing dependencies #############################################
 import csv
+import boto3
 import subprocess
 import pandas as pd
 import networkx as nx
@@ -55,6 +56,10 @@ class ScipiVisual():
 
         # set whether executing on local or cloud environment 
         self.is_local = is_local
+
+        # to access s3 bucket on cloud execution
+        if self.is_local == False:
+            self.s3 = boto3.client("s3")
 
     def pandas_factory(self, colnames, rows):
         return pd.DataFrame(rows, columns=colnames)
@@ -328,7 +333,15 @@ class ScipiVisual():
         shellscript.wait()   
 
         print("Top 100 Major Keywords")
-        major_keywords = pd.read_csv(results_path + "/topicsKeywords.csv", header=None)
+
+        # get according to the env
+        major_keywords = None 
+        if self.is_local:
+            major_keywords = pd.read_csv(results_path + "/topicsKeywords.csv", header=None)
+        else:
+            kw_obj = self.s3.get_object(Bucket="scipiresults", Key="topics/topicsKeywords.csv")
+            major_keywords = pd.read_csv(kw_obj["Body"])
+
         major_keywords.columns = ["Keyword", "Count"]
 
         # sort dataframe by author (unit) 
@@ -854,3 +867,7 @@ class ScipiVisual():
 
         # closes connections/sessions with cassandraDB cluster 
         self.cluster.shutdown()
+
+        # close boto3 client
+        if self.is_local == False:
+            self.s3.close()
