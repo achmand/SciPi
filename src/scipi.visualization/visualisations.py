@@ -15,9 +15,6 @@ from IPython.core.display import display, HTML
 from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
 init_notebook_mode(connected=True)
 
-# TODO: Check this out: https://www.natureindex.com/news-blog/paper-authorship-goes-hyper
-# TODO: write comments for methods and init  
-
 class ScipiVisual():
 
     # only one keyspace is used to interact with scipi datae
@@ -308,6 +305,80 @@ class ScipiVisual():
                                        xTitle="Year",
                                        yTitle="No. of Publications",
                                        title=tbl_title))    
+
+    # show major keywords as a table if the count is >= n_count
+    def apply_major_topics(self, n_count, result_path):
+
+        # get src for bash according to execution env
+        bash_src = "/src/scripts/local_flink_topics.sh" if self.is_local else "/src/scripts/cloud_flink_topics.sh"
+        script_path = "{}{}".format(self.scipi_path, bash_src)
+        print("Executing {}".format(script_path))
+        
+        # get results path 
+        results_path = "{}{}".format(self.scipi_path + "/results", result_path)
+        
+        # script_path = "../scripts/local_flink_community_kw.sh"
+        shellscript = subprocess.Popen([script_path, 
+                                        self.scipi_path, 
+                                        n_count, 
+                                        results_path], stdin=subprocess.PIPE)
+        
+        # blocks until shellscript is done
+        shellscript.stdin.close()
+        shellscript.wait()   
+
+        print("Top 100 Major Keywords")
+        major_keywords = pd.read_csv(results_path + "/topicsKeywords.csv", header=None)
+        major_keywords.columns = ["Keyword", "Count"]
+
+        # sort dataframe by author (unit) 
+        major_keywords.sort_values(by=["Count"], 
+                       ascending=False, 
+                       inplace=True)
+
+        major_keywords = major_keywords.head(100)
+
+        # show table using pyplot 
+        trace = go.Table(
+                header=dict(values=list(major_keywords.columns),
+                            fill = dict(color='#C2D4FF'),
+                            align = ['left'] * 5),
+                cells=dict(values=[major_keywords["Keyword"],
+                                   major_keywords["Count"]],
+               fill = dict(color='#F5F8FF'),
+               align = ['left'] * 5))
+
+        tbl_layout = dict(width=900, height=700)
+        table_result = [trace] 
+        fig = dict(data=table_result, layout=tbl_layout)
+        iplot(fig, filename = "pandas_table")
+
+        # plot major fields
+        print("Top 100 Major Fields")
+        major_fields = pd.read_csv(results_path + "/topicsFos.csv", header=None)
+        major_fields.columns = ["Field", "Count"]
+
+        # sort dataframe by author (unit) 
+        major_fields.sort_values(by=["Count"], 
+                       ascending=False, 
+                       inplace=True)
+
+        major_fields = major_fields.head(100)
+
+        # show table using pyplot 
+        trace = go.Table(
+                header=dict(values=list(major_fields.columns),
+                            fill = dict(color='#C2D4FF'),
+                            align = ['left'] * 5),
+                cells=dict(values=[major_fields["Field"],
+                                   major_fields["Count"]],
+               fill = dict(color='#F5F8FF'),
+               align = ['left'] * 5))
+
+        tbl_layout = dict(width=900, height=700)
+        table_result = [trace] 
+        fig = dict(data=table_result, layout=tbl_layout)
+        iplot(fig, filename = "pandas_table")
 
     # apply community detection using field of study 
     def apply_community_detection_fos(self, sender):
@@ -691,7 +762,6 @@ class ScipiVisual():
         columns = ["Author", "Potential Collaborators", "No. Collaborators"]
         df = pd.DataFrame([x for x in collab_list], columns=columns)
 
-        # show table using pyplot 
         # show table using pyplot 
         trace = go.Table(
                 header=dict(values=list(df.columns),

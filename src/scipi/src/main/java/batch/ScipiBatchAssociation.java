@@ -1,6 +1,5 @@
 package batch;
 
-
 /*
 Handles/processes data in batch found in CassandraDB using Apache Flink (Association/Correlation Analysis.
 
@@ -11,13 +10,12 @@ Parameters
 > results_path: the path where to save all results
 > total_sample_results: the number of samples to save as a sample
 > sample_results_only: saves only sample results not full results "0" or "1"
-> cosine_k:
-> cosine_similarity_threshold:
+> cosine_k: vectors of occurrences of k-shingles (sequences of k characters) for cosine algorithm
+> cosine_similarity_threshold: the similarity threshold which constitutes as an association
 > kw_usage_threshold: author to keyword association -> threshold to get only strong associations
 */
 
 // importing packages
-
 
 import com.datastax.driver.core.Cluster;
 import info.debatty.java.stringsimilarity.Cosine;
@@ -50,7 +48,6 @@ import java.util.Set;
 public class ScipiBatchAssociation {
 
     public static void main(String[] args) throws Exception {
-
 
         // returns the stream execution environment (the context 'Local or Remote' in which a program is executed)
         // LocalEnvironment will cause execution in the current JVM
