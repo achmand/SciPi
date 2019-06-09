@@ -32,7 +32,7 @@ public class DblpParser {
 
             System.out.println("Parsing...");
 
-            properties.setProperty("bootstrap.servers", "localhost:9092"); // IP address where Kafka is running
+            properties.setProperty("bootstrap.servers", "35.158.135.251:9092,18.197.44.232:9092,18.185.136.226:9092"); // IP address where Kafka is running
             properties.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
             properties.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
             producer = new KafkaProducer<String, String>(properties);

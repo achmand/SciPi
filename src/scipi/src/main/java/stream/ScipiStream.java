@@ -91,8 +91,8 @@ public class ScipiStream {
                 new SimpleStringSchema(),
                 properties);
 
-        // start reading from partitions from the earliest record
-        kafkaOag.setStartFromEarliest();
+        // start reading from partitions from the latest record
+        kafkaOag.setStartFromLatest();
 
         // kafka consumer for kafka stream (topic: dblp)
         FlinkKafkaConsumer<String> kafkaDblp = new FlinkKafkaConsumer<String>(
@@ -100,8 +100,8 @@ public class ScipiStream {
                 new SimpleStringSchema(),
                 properties);
 
-        // start reading from partitions from the earliest record
-        kafkaDblp.setStartFromEarliest();
+        // start reading from partitions from the latest record
+        kafkaDblp.setStartFromLatest();
 
         // gets cassandra points from input
         // the cassandra point (IP) that the driver uses to discover the cluster topology
