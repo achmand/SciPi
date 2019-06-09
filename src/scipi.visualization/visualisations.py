@@ -376,7 +376,6 @@ class ScipiVisual():
             fos_obj = self.s3.get_object(Bucket="scipiresults", Key="topics/topicsFos.csv")
             major_fields = pd.read_csv(fos_obj["Body"])
 
-        major_fields = pd.read_csv(results_path + "/topicsFos.csv", header=None)
         major_fields.columns = ["Field", "Count"]
 
         # sort dataframe by author (unit) 
