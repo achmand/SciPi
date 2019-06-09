@@ -332,9 +332,8 @@ class ScipiVisual():
         shellscript.stdin.close()
         shellscript.wait()   
 
-        print("Top 100 Major Keywords")
-
         # get according to the env
+        print("Top 100 Major Keywords")
         major_keywords = None 
         if self.is_local:
             major_keywords = pd.read_csv(results_path + "/topicsKeywords.csv", header=None)
@@ -368,6 +367,15 @@ class ScipiVisual():
 
         # plot major fields
         print("Top 100 Major Fields")
+
+        # get according to the env
+        major_fields = None
+        if self.is_local:
+            major_fields = pd.read_csv(results_path + "/topicsFos.csv", header=None)
+        else:
+            fos_obj = self.s3.get_object(Bucket="scipiresults", Key="topics/topicsFos.csv")
+            major_fields = pd.read_csv(fos_obj["Body"])
+
         major_fields = pd.read_csv(results_path + "/topicsFos.csv", header=None)
         major_fields.columns = ["Field", "Count"]
 
@@ -422,7 +430,7 @@ class ScipiVisual():
     def apply_community_detection(self, values, script_path):
 
         # get results path 
-        results_path = "{}{}".format(self.scipi_path + "/results", self.community_result_path)
+        results_path = "{}{}".format(self.scipi_path + "/results", self.community_result_path) if self.is_local else "s3://scipiresults" + self.community_result_path
         
         # script_path = "../scripts/local_flink_community_kw.sh"
         shellscript = subprocess.Popen([script_path, 
@@ -471,7 +479,7 @@ class ScipiVisual():
         print("Executing {}".format(script_path))
 
         # get results path 
-        results_path = "{}{}".format(self.scipi_path + "/results", self.association_result_path)
+        results_path = "{}{}".format(self.scipi_path + "/results", self.association_result_path) if self.is_local else "s3://scipiresults/association_correlation"
 
         shellscript = subprocess.Popen([script_path,
                                         self.scipi_path,
@@ -495,7 +503,6 @@ class ScipiVisual():
 
     def author_association(self, result_path):
         print("IMPORTANT: Wait for print complete to continue and press ENTER ONCE on one text box\n")
-
         self.association_result_path = result_path
 
         # input for keywords to apply association/correlation analysis 
@@ -507,7 +514,7 @@ class ScipiVisual():
     def plot_community(self, layout, community_colors, result_path):
         
         # get edges result 
-        path = "{}{}".format(result_path, "/communitySample.csv")
+        path = "{}{}".format(result_path, "/communitySample.csv") if self.is_local else "s3://scipiresults" + self.community_result_path + "/communitySample.csv"
         with open(path) as f:
             data=[tuple(line) for line in csv.reader(f)]
 
@@ -614,8 +621,16 @@ class ScipiVisual():
         print("No. Nodes: {}\nNo. Edges: {}".format(G.number_of_nodes(), G.number_of_edges()))
 
         # show all communities and it's count 
-        path = "{}{}".format(result_path, "/communityLabelCount.csv")
-        community_count = pd.read_csv(path,header=None)
+        path = "{}{}".format(result_path, "/communityLabelCount.csv") if self.is_local else self.community_result_path + "/communityLabelCount.csv"
+        
+        # open according to env
+        community_count = None
+        if self.is_local:
+            community_count = pd.read_csv(path,header=None)
+        else:
+            community_obj = self.s3.get_object(Bucket="scipiresults", Key=path)
+            community_count = pd.read_csv(community_obj["Body"])
+
         community_count.columns = ["Labels", "Count"]
 
         # print stats
@@ -636,7 +651,7 @@ class ScipiVisual():
     def plot_author_keyword(self, layout):
         
         # path for result
-        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorKwSample.csv")
+        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorKwSample.csv") if self.is_local else "s3://scipiresults" + self.association_result_path +  "/authorKwSample.csv"
         
         # get author to keywords edges result 
         with open(path) as f:
@@ -737,7 +752,7 @@ class ScipiVisual():
     def plot_author_clustering(self, layout):
         
         # path for result
-        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorsCollabSample.csv")
+        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorsCollabSample.csv") if self.is_local else "s3://scipiresults" + self.association_result_path + "/authorsCollabSample.csv"
         
         # get author edges result 
         with open(path) as f:

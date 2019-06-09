@@ -2,7 +2,7 @@
 
 flink run -p 8 $1/src/scipi/jars/scipi_community.jar \
 --cassandra_point ec2-18-195-41-253.eu-central-1.compute.amazonaws.com \
---keywords "$2" \
+--domains "$2" \
 --results_path "$3" \
 --total_sample_results 200 \
 --sample_results_only 1 \
