@@ -1,7 +1,7 @@
 package batch;
 
 /*
-Handles/processes data in batch found in CassandraDB using Apache Flink.
+Handles/processes data in batch found in CassandraDB using Apache Flink (Community Detection).
 
 Parameters
 ----------
@@ -14,6 +14,7 @@ Parameters
 > community_iterations: number of iterations used in the CommunityDetectionAlgorithm
 > community_delta: delta used in the CommunityDetectionAlgorithm (default value 0.5)
 > n_top_communities: the total top n communities to get results for
+> n_dense_community: how many vertices with the same label to constitute as a dense community
 */
 
 // importing packages
@@ -113,6 +114,9 @@ public class ScipiBatchCommunity {
 
         // get the total n top communities to get results for
         Integer totalTopCommunities = parameters.getInt("n_top_communities");
+
+        // how many vertices with the same label to constitute as a dense community
+        final Integer nDenseCommunity = parameters.getInt("n_dense_community");
 
         // create POJO input format to get Publication entities from CassandraDB
         CassandraPojoInputFormat cassandraPojoInputFormat = new CassandraPojoInputFormat<Publication>(
@@ -225,7 +229,7 @@ public class ScipiBatchCommunity {
                 .filter(new FilterFunction<Tuple2<Long, Long>>() {
                     @Override
                     public boolean filter(Tuple2<Long, Long> value) throws Exception {
-                        return value.f1 >= 500;
+                        return value.f1 >= nDenseCommunity;
                     }
                 });
 
@@ -602,7 +606,7 @@ public class ScipiBatchCommunity {
 //        communityLabelsCount.writeAsCsv("/home/delinvas/repos/SciPi/output3");
 
         // execute job
-        environment.execute("scipi batch processing");
+        environment.execute("scipi Community Detection");
     }
 
 

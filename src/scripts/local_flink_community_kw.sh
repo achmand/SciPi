@@ -9,4 +9,5 @@ run -c batch.ScipiBatchCommunity /home/delinvas/repos/SciPi/src/scipi/out/artifa
 --sample_results_only 1 \
 --community_iterations 10 \
 --community_delta 0.5 \
---n_top_communities 3 
+--n_top_communities 3 \
+--n_dense_community 150
