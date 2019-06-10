@@ -5,7 +5,7 @@ flink run -p 8 $1/src/scipi/jars/scipi_community.jar \
 --domains "$2" \
 --results_path "$3" \
 --total_sample_results 200 \
---sample_results_only 1 \
+--sample_results_only 0 \
 --community_iterations 10 \
 --community_delta 0.5 \
 --n_top_communities 3 \
