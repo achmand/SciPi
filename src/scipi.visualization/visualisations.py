@@ -513,9 +513,16 @@ class ScipiVisual():
     def plot_community(self, layout, community_colors, result_path):
         
         # get edges result 
-        path = "{}{}".format(result_path, "/communitySample.csv") if self.is_local else "s3://scipiresults" + self.community_result_path + "/communitySample.csv"
-        with open(path) as f:
-            data=[tuple(line) for line in csv.reader(f)]
+        path = "{}{}".format(result_path, "/communitySample.csv") if self.is_local else self.community_result_path + "/communitySample.csv"
+        
+        data = None
+        if self.is_local:
+            with open(path) as f:
+                data=[tuple(line) for line in csv.reader(f)]
+        else:
+            community_lbl_obj = self.s3.get_object(Bucket="scipiresults", Key=path)
+            community_file = csv.reader(community_lbl_obj["Body"].read().splitlines(True))
+            data=[tuple(line) for line in community_file]
 
         # create a new graph 
         G = nx.DiGraph()
@@ -625,7 +632,7 @@ class ScipiVisual():
         # open according to env
         community_count = None
         if self.is_local:
-            community_count = pd.read_csv(path,header=None)
+            community_count = pd.read_csv(path, header=None)
         else:
             community_obj = self.s3.get_object(Bucket="scipiresults", Key=path)
             community_count = pd.read_csv(community_obj["Body"])
@@ -650,11 +657,17 @@ class ScipiVisual():
     def plot_author_keyword(self, layout):
         
         # path for result
-        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorKwSample.csv") if self.is_local else "s3://scipiresults" + self.association_result_path +  "/authorKwSample.csv"
+        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorKwSample.csv") if self.is_local else self.association_result_path +  "/authorKwSample.csv"
         
         # get author to keywords edges result 
-        with open(path) as f:
-            data=[tuple(line) for line in csv.reader(f)]
+        data = None
+        if self.is_local:
+            with open(path) as f:
+                data=[tuple(line) for line in csv.reader(f)]
+        else:
+            author_s3_obj = self.s3.get_object(Bucket="scipiresults", Key=path)
+            author_file = csv.reader(author_s3_obj["Body"].read().splitlines(True))
+            data=[tuple(line) for line in author_file]
 
         # create a new graph 
         G = nx.Graph()
@@ -751,11 +764,17 @@ class ScipiVisual():
     def plot_author_clustering(self, layout):
         
         # path for result
-        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorsCollabSample.csv") if self.is_local else "s3://scipiresults" + self.association_result_path + "/authorsCollabSample.csv"
+        path = "{}{}{}".format(self.scipi_path + "/results", self.association_result_path, "/authorsCollabSample.csv") if self.is_local else self.association_result_path + "/authorsCollabSample.csv"
         
         # get author edges result 
-        with open(path) as f:
-            data=[tuple(line) for line in csv.reader(f)]
+        data = None
+        if self.is_local:
+            with open(path) as f:
+                data=[tuple(line) for line in csv.reader(f)]
+        else: 
+            cluster_lbl_obj = self.s3.get_object(Bucket="scipiresults", Key=path)
+            cluster_file = csv.reader(cluster_lbl_obj["Body"].read().splitlines(True))
+            data=[tuple(line) for line in cluster_file]
 
         # create a new graph 
         G = nx.Graph()
