@@ -100,10 +100,12 @@ class ScipiVisual():
 
         # compute and set % of total articles 
         total_articles = table_result["No. of publications"].sum()
-        table_result["% of total publications"] = round((table_result["No. of publications"] / total_articles) * 100, 2)
+        table_result["% of total publications"] = (table_result["No. of publications"] / total_articles) * 100
+        table_result["% of total publications"] = table_result["% of total publications"].round(2)
 
         # compute cum % of total publications
-        table_result["Cum.(%) of total publications"] = round(table_result["% of total publications"].cumsum(),1)
+        table_result["Cum.(%) of total publications"] = table_result["% of total publications"].cumsum()
+        table_result["Cum.(%) of total publications"] =  table_result["Cum.(%) of total publications"].round(2)
 
         # reset index name 
         table_result.index.names = ["No. authors (unit)"]
@@ -121,8 +123,11 @@ class ScipiVisual():
                fill = dict(color='#F5F8FF'),
                align = ['left'] * 5))
 
+        
         table_plot_result = [trace] 
-        iplot(table_plot_result, filename = "pandas_table")
+        layout = dict(width=800, height=700)
+        fig = dict(data=table_plot_result, layout=layout)
+        iplot(fig, filename = "pandas_table")
 
         # plot authorship patterns 
         iplot(table_result[["% of total publications"]].iplot(
@@ -140,16 +145,22 @@ class ScipiVisual():
                                   timeout=None)._current_rows
         
         # set year column as index
-        df.set_index("year", inplace=True)
-        
+        df["year"] = pd.to_numeric(df["year"])
+        df = df.loc[df["year"] <= 2019]
+
         # sort dataframe by year 
         df.sort_values(by=["year"], 
                        ascending=False, 
                        inplace=True)
+        df.set_index("year", inplace=True)
+
 
         # format percentages and round to two decimal places 
-        df["single_perc"] = round(df["single_perc"]*100.00, 2)
-        df["joint_perc"] = round(df["joint_perc"]*100.00, 2)
+        df["single_perc"] = df["single_perc"]*100.00
+        df["single_perc"] = df["single_perc"].round(2)
+        
+        df["joint_perc"] = df["joint_perc"]*100.00
+        df["joint_perc"] = df["joint_perc"].round(2)
 
         # set column names 
         df.columns = ["Single authored", 
@@ -181,8 +192,10 @@ class ScipiVisual():
                fill = dict(color='#F5F8FF'),
                align = ['left'] * 5))
 
+        layout = dict(width=800, height=700)
         table_result = [trace] 
-        iplot(table_result, filename = "pandas_table")
+        fig = dict(data=table_result, layout=layout)
+        iplot(fig, filename = "pandas_table")
 
         # plot single authored vs joint authored (total publications)
         iplot(result[["Single authored", 
@@ -208,8 +221,10 @@ class ScipiVisual():
         table = self.cassandra_tbls["avgauthors"]
         df = self.session.execute("SELECT year, no_articles, no_authors, avg_author_paper FROM " + table + ";",
                                   timeout=None)._current_rows
-        
+                
         # set year column as index
+        df["year"] = pd.to_numeric(df["year"])
+        df = df.loc[df["year"] <= 2019]
         df.set_index("year", inplace=True)
         
         # sort dataframe by year 
@@ -218,7 +233,7 @@ class ScipiVisual():
                        inplace=True)
 
         # round AAP to 2 decimal places 
-        df["avg_author_paper"] = round(df["avg_author_paper"], 2)
+        df["avg_author_paper"] = df["avg_author_paper"].round(2)
 
         # set column names 
         df.columns = ["Total no. of papers (P)", 
@@ -298,7 +313,7 @@ class ScipiVisual():
                fill = dict(color='#F5F8FF'),
                align = ['left'] * 5))
 
-        layout = dict(width=800, height=300)
+        layout = dict(width=800, height=800)
         table_result = [trace] 
         fig = dict(data=table_result, layout=layout)
         iplot(fig, filename = "pandas_table")
@@ -641,16 +656,12 @@ class ScipiVisual():
 
         # print stats
         print("\n\nCommunity Detection Stats\n##############################")
-        print("Total No. of Communities with >= 500 entities (dense communities): {}".format(community_count.shape[0]))
-        total_entites = community_count["Count"].sum() 
-        
-        print("Total Entities in these Communities: {}".format(total_entites))
-        
         community_count["Count"] = pd.to_numeric(community_count["Count"], 
                                                  downcast="float")
 
         count_sum = community_count["Count"].sum()       
-        community_count["Weighted score"] = round(community_count["Count"] * (community_count["Count"] / count_sum), 2)
+        community_count["Weighted score"] = community_count["Count"] * (community_count["Count"] / count_sum)
+        community_count["Weighted score"] = community_count["Weighted score"] .round(2)
         collaboration_strength = community_count["Weighted score"].sum() / 100
         print("Strength between these Communities using weighted avg. : {:.2f}".format(collaboration_strength))
 
